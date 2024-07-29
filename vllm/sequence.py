@@ -81,6 +81,33 @@ class SequenceStage(enum.Enum):
     PREFILL = enum.auto()
     DECODE = enum.auto()
 
+# import heapq  
+
+# class SequenceGroupMinHeap:  
+#     def __init__(self):  
+#         self.heap = []  
+    
+#     def push(self, val):  
+#         """Insert an element"""  
+#         heapq.heappush(self.heap, val)  
+    
+#     def pop_min(self):  
+#         """Pop out the smallest element"""  
+#         if self.heap:  
+#             return heapq.heappop(self.heap)  
+#         else:  
+#             return None
+    
+#     def get_min(self):  
+#         """Take the minimum element but not pop"""  
+#         if self.heap:  
+#             return self.heap[0]  
+#         else:  
+#             return None 
+    
+#     def size(self):  
+#         """Get the size of heap"""  
+#         return len(self.heap)  
 
 @dataclass
 class RequestMetrics:
@@ -468,6 +495,8 @@ class SequenceGroup:
         self.encoder_seq = encoder_seq
         self.trace_headers = trace_headers
         self._first_seq = next(iter(self.seqs_dict.values()))
+        # self._finished_seq = SequenceGroupMinHeap()
+        self._finished_seq: List[Sequence] = []
 
     @property
     def prompt(self) -> Optional[str]:
@@ -500,6 +529,41 @@ class SequenceGroup:
     def prompt_adapter_num_virtual_tokens(self) -> int:
         return self.prompt_adapter_request.prompt_adapter_num_virtual_tokens\
                          if self.prompt_adapter_request else 0
+
+    def save_request(self, seq: Sequence) -> bool:
+        if len(self._finished_seq) < self.sampling_params.n:
+            self._finished_seq.push(seq)
+            return None
+        
+        assert len(self._finished_seq) == self.sampling_params.n
+        if self.sampling_params.use_beam_search:
+            cur_prob = seq.get_beam_search_score(self.sampling_params.length_penalty)
+            min_prob_index = 0
+            min_prob = self._finished_seq[0].get_beam_search_score(self.sampling_params.length_penalty)
+            for i in range(1, self._finished_seq.size()):
+                prob = self._finished_seq[i].get_beam_search_score(self.sampling_params.length_penalty)
+                if prob < min_prob:
+                    min_prob = prob
+                    min_prob_index = i
+            if cur_prob > min_prob:
+                seq_to_remove = self._finished_seq[min_prob_index]
+                self._finished_seq[min_prob_index] = seq
+                return seq_to_remove
+        else:
+            cur_prob = seq.get_cumulative_logprob()
+            min_prob_index = 0
+            min_prob = self._finished_seq[0].get_cumulative_logprob()
+            for i in range(1, self._finished_seq.size()):
+                prob = self._finished_seq[i].get_cumulative_logprob()
+                if prob < min_prob:
+                    min_prob = prob
+                    min_prob_index = i
+            if cur_prob > min_prob:
+                seq_to_remove = self._finished_seq[min_prob_index]
+                self._finished_seq[min_prob_index] = seq
+                return seq_to_remove
+        
+        return seq
 
     def get_last_latency(self, now: float) -> Optional[float]:
         """Sets the last token time for Request level timings."""

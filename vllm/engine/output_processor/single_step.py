@@ -156,8 +156,10 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
             # old sequences.
             for seq, parent in child_seqs:
                 if seq is parent and seq.is_finished():
-                    for scheduler in self.scheduler:
-                        scheduler.free_seq(seq)
+                    seq_to_remove = seq_group.save_request(seq)
+                    if seq_to_remove is not None:
+                        for scheduler in self.scheduler:
+                            scheduler.free_seq(seq_to_remove)
             return
 
         # Beam search case
@@ -249,8 +251,10 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
         # manager. Keep them in the sequence group as candidate output.
         for seq, parent in selected_child_seqs:
             if seq is parent and seq.is_finished():
-                for scheduler in self.scheduler:
-                    scheduler.free_seq(seq)
+                seq_to_remove = seq_group.save_request(seq)
+                if seq_to_remove is not None:
+                    for scheduler in self.scheduler:
+                        scheduler.free_seq(seq_to_remove)
 
         # Remove the unselected parent sequences from the sequence group and
         # free their memory in block manager.
