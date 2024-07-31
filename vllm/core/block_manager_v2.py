@@ -221,6 +221,24 @@ class BlockSpaceManagerV2(BlockSpaceManager):
             Device.GPU)
         return num_touched_blocks <= num_free_gpu_blocks
 
+
+    def get_append_required_blocks(self, seq_group:SequenceGroup,
+                                    num_lookahead_slots:int) -> int:
+        num_touched_blocks = 0
+        for seq in seq_group.get_seqs(status=SequenceStatus.RUNNING):
+            block_table = self.block_tables[seq.seq_id]
+
+            num_touched_blocks += (
+                block_table.get_num_blocks_touched_by_append_slots(
+                    token_ids=block_table.get_unseen_token_ids(
+                        seq.get_token_ids()),
+                    num_lookahead_slots=num_lookahead_slots,
+                ))
+
+        num_free_gpu_blocks = self.block_allocator.get_num_free_blocks(
+            Device.GPU)
+        return num_touched_blocks - num_free_gpu_blocks
+    
     def append_slots(
         self,
         seq: Sequence,
@@ -256,6 +274,25 @@ class BlockSpaceManagerV2(BlockSpaceManager):
         # Free table/blocks
         self.block_tables[seq_id].free()
         del self.block_tables[seq_id]
+
+    def free_last_blocks(self, seq: Sequence, num_blocks: int) -> None:
+        seq_id = seq.seq_id
+
+        if seq_id not in self.block_tables:
+            # Already freed or haven't been scheduled yet.
+            return
+
+        # Update seq block ids with the latest access time
+        self._last_access_blocks_tracker.update_seq_blocks_last_access(
+            seq_id, self.block_tables[seq.seq_id].physical_block_ids)
+
+        # Untrack seq
+        # self._last_access_blocks_tracker.remove_seq(seq_id)
+        # self._computed_blocks_tracker.remove_seq(seq_id)
+
+        # Free table/blocks
+        self.block_tables[seq_id].free_(num_blocks)
+        
 
     def free_cross(self, seq_group: SequenceGroup) -> None:
         request_id = seq_group.request_id

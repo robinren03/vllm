@@ -41,12 +41,25 @@ async def generate(request: Request) -> Response:
     The request should be a JSON object with the following fields:
     - prompt: the prompt to use for the generation.
     - stream: whether to stream the results or not.
+    - session_id: the session ID to use for the generation.
+    - stop: the stop sequence to use for the generation.
     - other fields: the sampling parameters (See `SamplingParams` for details).
     """
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
+    stop = request_dict.pop("stop", None)
+    session_id = request_dict.pop("session_id", "")
     sampling_params = SamplingParams(**request_dict)
+    if sampling_params.n != 1:
+        return Response(status_code=501, content="n!=1 not supported")
+    
+    if stop:
+        if result:=engine.remove_session(session_id) == True:
+            return Response(status_code=200)
+        else:
+            return Response(status_code=500, content=str(result))
+        
     request_id = random_uuid()
 
     assert engine is not None

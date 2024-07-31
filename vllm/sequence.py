@@ -307,12 +307,16 @@ class Sequence:
         # Used for incremental detokenization
         self.prefix_offset = 0
         self.read_offset = 0
+
+        # Used for finished sequence breaking
+        self.finished_removed = 0
+
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
 
     @property
     def n_blocks(self) -> int:
-        return math.ceil(self.get_len() / self.block_size)
+        return math.ceil(self.get_len() / self.block_size) - self.finished_removed
 
     @property
     def prompt(self) -> Optional[str]:

@@ -779,6 +779,12 @@ class AsyncLLMEngine:
         ):
             yield LLMEngine.validate_output(output, RequestOutput)
 
+    async def remove_session(
+            self,
+            session_id: str
+    ):
+        raise NotImplementedError
+    
     async def encode(
         self,
         inputs: PromptInputs,

@@ -357,6 +357,12 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         num_seqs = seq_group.num_seqs(status=SequenceStatus.RUNNING)
         return num_seqs <= num_free_gpu_blocks
 
+    def get_append_required_blocks(self, seq_group:SequenceGroup,
+                                    num_lookahead_slots:int) -> int:
+        num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
+        num_seqs = seq_group.num_seqs(status=SequenceStatus.RUNNING)
+        return num_seqs - num_free_gpu_blocks
+
     def _promote_last_block(
         self,
         seq: Sequence,
@@ -617,6 +623,20 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         self._free_block_table(block_table)
         del self.block_tables[seq.seq_id]
 
+    def free_last_blocks(self, seq: Sequence, num_blocks: int) -> None:
+        if seq.seq_id not in self.block_tables:
+            # Already freed or hasn't been scheduled yet.
+            return
+        block_table = self.block_tables[seq.seq_id]
+        for _ in range(num_blocks):
+            if not block_table:
+                break
+            block = block_table.pop()
+            if block.device == Device.GPU:
+                self.gpu_allocator.free(block)
+            else:
+                self.cpu_allocator.free(block)
+        
     def free_cross(self, seq_group: SequenceGroup) -> None:
         if seq_group.request_id not in self.cross_block_tables:
             # Already freed or hasn't ben scheduled yet.

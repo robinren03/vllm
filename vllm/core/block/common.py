@@ -275,6 +275,10 @@ class BlockList:
         self._blocks = []
         self._block_ids = []
 
+    def reset_(self, num_blocks):
+        self._blocks = self._blocks[:-num_blocks]
+        self._block_ids = self._block_ids[:-num_blocks]
+
     def list(self) -> List[Block]:
         return self._blocks
 

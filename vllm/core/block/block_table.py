@@ -220,6 +220,14 @@ class BlockTable:
             self._allocator.free(block)
         self._blocks.reset()
 
+    def free_(self, num_block:int) -> None:
+        """Frees the memory occupied by the blocks in the BlockTable.
+        """
+        assert self._is_allocated
+        for block in self.blocks[-num_block:]:
+            self._allocator.free(block)
+        self._blocks.reset_(num_block)
+
     @property
     def physical_block_ids(self) -> List[int]:
         """Returns a list of physical block indices for the blocks in the

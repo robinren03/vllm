@@ -401,6 +401,7 @@ class Scheduler:
         curr_loras: Optional[Set[int]],
         policy: Policy,
         enable_chunking: bool = False,
+        finished_queue: deque = None
     ) -> Tuple[deque, SchedulerRunningOutputs]:
         """Schedule sequence groups that are running.
 
@@ -458,7 +459,16 @@ class Scheduler:
                         and seq_group.lora_int_id in curr_loras):
                     curr_loras.remove(seq_group.lora_int_id)
 
-                if running_queue:
+                if finished_queue is not None and len(finished_queue) > 0:
+                    required_slot = self._required_slots(seq_group)
+                    victim_seq: Sequence = finished_queue[0]
+                    if (victim_seq.n_blocks() <= required_slot):
+                        self.free_seq(victim_seq)
+                        finished_queue.popleft()
+                    else:
+                        self.free_finished_seq(victim_seq_group, required_slot)
+
+                elif running_queue:
                     # Preempt the lowest-priority sequence groups.
                     victim_seq_group = running_queue.pop()
                     preempted_mode = self._preempt(victim_seq_group,
@@ -971,6 +981,9 @@ class Scheduler:
             num_lookahead_slots=self._get_num_lookahead_slots(is_prefill),
         )
 
+    def _required_slots(self, seq_group: SequenceGroup) -> int:
+        return self.block_manager.get_append_required_blocks(seq_group)
+    
     def schedule(self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler
@@ -1056,6 +1069,9 @@ class Scheduler:
     def free_seq(self, seq: Sequence) -> None:
         """Free a sequence from a block table."""
         self.block_manager.free(seq)
+
+    def free_finished_seq(self, seq: Sequence, num_blocks: int) -> None:
+        self.block_manager.free_last_blocks(seq, num_blocks)
 
     def free_finished_seq_groups(self) -> None:
         for queue in [self.running, self.swapped, self.waiting]:

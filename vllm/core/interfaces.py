@@ -54,6 +54,11 @@ class BlockSpaceManager(ABC):
     def can_append_slots(self, seq_group: SequenceGroup,
                          num_lookahead_slots: int) -> bool:
         pass
+    
+    @abstractmethod
+    def get_append_required_blocks(self, seq_group:SequenceGroup,
+                                    num_lookahead_slots:int) -> int:
+        pass
 
     @abstractmethod
     def append_slots(
@@ -87,7 +92,11 @@ class BlockSpaceManager(ABC):
     @abstractmethod
     def free(self, seq: Sequence) -> None:
         pass
-
+    
+    @abstractmethod
+    def free_last_blocks(self, seq: Sequence, num_blocks: int) -> None:
+        pass
+    
     @abstractmethod
     def get_block_table(self, seq: Sequence) -> List[int]:
         pass

@@ -32,6 +32,10 @@ class EmbeddingModelBlockSpaceManager(BlockSpaceManager):
                          num_lookahead_slots: int) -> bool:
         return True
 
+    def _get_append_required_blocks(self, seq_group:SequenceGroup,
+                                    num_lookahead_slots:int) -> int:
+        return 0
+    
     def append_slots(
         self,
         seq: Sequence,
