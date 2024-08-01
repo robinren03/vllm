@@ -474,6 +474,7 @@ class SequenceGroup:
         request_id: str,
         seqs: List[Sequence],
         arrival_time: float,
+        session_id: Optional[str] = None,
         sampling_params: Optional[SamplingParams] = None,
         lora_request: Optional[LoRARequest] = None,
         embeddings: Optional[List[float]] = None,
@@ -485,6 +486,7 @@ class SequenceGroup:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
+        self.session_id = session_id
         self.metrics = RequestMetrics(arrival_time=arrival_time,
                                       last_token_time=arrival_time,
                                       first_scheduled_time=None,
@@ -535,6 +537,9 @@ class SequenceGroup:
                          if self.prompt_adapter_request else 0
 
     def save_request(self, seq: Sequence) -> bool:
+        if self.session_id is None:
+            return seq
+        
         if len(self._finished_seq) < self.sampling_params.n:
             self._finished_seq.push(seq)
             return None

@@ -376,6 +376,13 @@ class LLMEngine:
 
         self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
+    def free_session(self, session_id: str, session_block_ids) -> None:
+        """Free the session's resources."""
+        for scheduler, session_block_id in zip(self.scheduler, session_block_ids):
+            if session_id in session_block_id:
+                scheduler.free_seq(session_block_id[session_id])
+                del session_block_id[session_id]
+
     @classmethod
     def _get_executor_cls(cls,
                           engine_config: EngineConfig) -> Type[ExecutorBase]:
@@ -524,6 +531,7 @@ class LLMEngine:
         lora_request: Optional[LoRARequest],
         prompt_adapter_request: Optional[PromptAdapterRequest],
         trace_headers: Optional[Mapping[str, str]] = None,
+        session_id: Optional[str] = None,
     ) -> None:
         # Create the sequences.
         block_size = self.cache_config.block_size
@@ -542,7 +550,8 @@ class LLMEngine:
                 arrival_time=arrival_time,
                 lora_request=lora_request,
                 trace_headers=trace_headers,
-                prompt_adapter_request=prompt_adapter_request)
+                prompt_adapter_request=prompt_adapter_request,
+                session_id=session_id)
         elif isinstance(params, PoolingParams):
             seq_group = self._create_sequence_group_with_pooling(
                 request_id,
@@ -550,7 +559,8 @@ class LLMEngine:
                 params,
                 arrival_time=arrival_time,
                 lora_request=lora_request,
-                prompt_adapter_request=prompt_adapter_request)
+                prompt_adapter_request=prompt_adapter_request,
+                session_id=session_id)
         else:
             raise ValueError(
                 "Either SamplingParams or PoolingParams must be provided.")
@@ -606,6 +616,7 @@ class LLMEngine:
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        session_id: Optional[str] = None,
     ) -> None:
         """Add a request to the engine's request pool.
 
@@ -669,6 +680,7 @@ class LLMEngine:
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
             trace_headers=trace_headers,
+            session_id=session_id
         )
 
     def _create_sequence_group_with_sampling(
@@ -680,6 +692,7 @@ class LLMEngine:
         lora_request: Optional[LoRARequest],
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        session_id: str = None,
     ) -> SequenceGroup:
         """Creates a SequenceGroup with SamplingParams."""
         max_logprobs = self.get_model_config().max_logprobs
@@ -705,7 +718,8 @@ class LLMEngine:
             sampling_params=sampling_params,
             lora_request=lora_request,
             trace_headers=trace_headers,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            session_id=session_id)
 
         return seq_group
 
@@ -717,6 +731,7 @@ class LLMEngine:
         arrival_time: float,
         lora_request: Optional[LoRARequest],
         prompt_adapter_request: Optional[PromptAdapterRequest],
+        session_id: Optional[str] = None,
     ) -> SequenceGroup:
         """Creates a SequenceGroup with PoolingParams."""
         # Defensive copy of PoolingParams, which are used by the pooler
@@ -728,10 +743,11 @@ class LLMEngine:
             arrival_time=arrival_time,
             lora_request=lora_request,
             pooling_params=pooling_params,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            session_id=session_id)
         return seq_group
 
-    def abort_request(self, request_id: Union[str, Iterable[str]]) -> None:
+    def abort_request(self, request_id: Union[str, Iterable[str]], is_exception:bool=True) -> None:
         """Aborts a request(s) with the given ID.
 
         Args:
@@ -749,7 +765,7 @@ class LLMEngine:
             >>> engine.abort_request(request_id)
         """
         for scheduler in self.scheduler:
-            scheduler.abort_seq_group(request_id)
+            scheduler.abort_seq_group(request_id, is_exception=is_exception)
 
     def get_model_config(self) -> ModelConfig:
         """Gets the model configuration."""
@@ -823,8 +839,10 @@ class LLMEngine:
                 self.output_processor.process_outputs(seq_group, outputs)
 
         # Free the finished sequence groups.
+        session_id_blocks = []
         for scheduler in self.scheduler:
-            scheduler.free_finished_seq_groups()
+            session_id_block = scheduler.free_finished_seq_groups()
+            session_id_blocks.append(session_id_block)
 
         # Create the outputs.
         request_outputs: List[Union[RequestOutput,
@@ -837,7 +855,7 @@ class LLMEngine:
         for seq_group in ignored_seq_groups:
             request_output = RequestOutputFactory.create(seq_group)
             request_outputs.append(request_output)
-        return request_outputs
+        return request_outputs, session_id_blocks
 
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
@@ -913,7 +931,7 @@ class LLMEngine:
         else:
             output = []
 
-        request_outputs = self._process_model_outputs(
+        request_outputs, session_id_blocks = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
@@ -931,7 +949,7 @@ class LLMEngine:
             # queued control plane messages, such as add/remove lora adapters.
             self.model_executor.stop_remote_worker_execution_loop()
 
-        return request_outputs
+        return request_outputs, session_id_blocks
 
     def add_logger(self, logger_name: str, logger: StatLoggerBase) -> None:
         if logger_name in self.stat_loggers:

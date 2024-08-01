@@ -49,9 +49,10 @@ async def generate(request: Request) -> Response:
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
     stop = request_dict.pop("stop", None)
-    session_id = request_dict.pop("session_id", "")
+    session_id = request_dict.pop("session_id", None)
+    
     sampling_params = SamplingParams(**request_dict)
-    if sampling_params.n != 1:
+    if sampling_params.n != 1 and session_id: # Sessionize only when 1 output needed
         return Response(status_code=501, content="n!=1 not supported")
     
     if stop:
@@ -63,7 +64,7 @@ async def generate(request: Request) -> Response:
     request_id = random_uuid()
 
     assert engine is not None
-    results_generator = engine.generate(prompt, sampling_params, request_id)
+    results_generator = engine.generate(prompt, sampling_params, request_id, session_id)
 
     # Streaming case
     async def stream_results() -> AsyncGenerator[bytes, None]:

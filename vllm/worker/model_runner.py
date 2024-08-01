@@ -271,7 +271,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # WARNING: The order of the functions matters!
         self.per_seq_compute_fns = [
             self._compute_lens,
-            self._compute_for_prefix_cache_hit,
+            self._compute_for_prefix_cache_hit, # The prefix is still the same, to change the inter_data
             self._compute_for_sliding_window,
             self._compute_lora_input,
         ]

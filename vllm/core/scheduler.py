@@ -344,7 +344,7 @@ class Scheduler:
         # Add sequence groups to the waiting queue.
         self.waiting.append(seq_group)
 
-    def abort_seq_group(self, request_id: Union[str, Iterable[str]]) -> None:
+    def abort_seq_group(self, request_id: Union[str, Iterable[str]], is_exception:bool=True) -> None:
         """Aborts a sequence group with the given ID.
 
         Check if the sequence group with the given ID
@@ -380,6 +380,11 @@ class Scheduler:
                         continue
                     seq.status = SequenceStatus.FINISHED_ABORTED
                     self.free_seq(seq)
+                
+                # For an aborted group, 
+                if is_exception:
+                    for seq in aborted_group._finished_seq:
+                        self.free_seq(seq)
 
     def has_unfinished_seqs(self) -> bool:
         return len(self.waiting) != 0 or len(self.running) != 0 or len(
@@ -1071,16 +1076,27 @@ class Scheduler:
         self.block_manager.free(seq)
 
     def free_finished_seq(self, seq: Sequence, num_blocks: int) -> None:
+        seq.finished_removed += num_blocks
         self.block_manager.free_last_blocks(seq, num_blocks)
 
     def free_finished_seq_groups(self) -> None:
+        session_id_block = {}
         for queue in [self.running, self.swapped, self.waiting]:
-            self._finished_requests_ids += [
-                seq_group.request_id for seq_group in queue
-                if seq_group.is_finished()
-            ]
+            for seq_group in queue:
+                if seq_group.is_finished():
+                    self._finished_requests_ids.append(seq_group.request_id)
+                    if session_id := seq_group.session_id: 
+                        assert len(seq_group._finished_seq) == 1
+                        seq = seq_group._finished_seq[0]
+                        if seq.seq_id in self.block_manager.block_tables: #if not, it has already been freed.
+                            session_id_block[session_id] = seq.seq_id
+                    else:
+                        for seq in seq_group.get_seqs():
+                            self.free_seq(seq)
+        
         self.running = deque(seq_group for seq_group in self.running
                              if not seq_group.is_finished())
+        return session_id_block
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
         self.block_manager.allocate(seq_group)

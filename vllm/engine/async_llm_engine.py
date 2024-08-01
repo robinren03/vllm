@@ -100,6 +100,7 @@ class RequestTracker:
     def __init__(self) -> None:
         self._request_streams: Dict[str, AsyncStream] = {}
         self._finished_requests: asyncio.Queue[str] = asyncio.Queue()
+        self._finished_requests_preserve: asyncio.Queue[str] = asyncio.Queue()
         self._new_requests: asyncio.Queue[Tuple[AsyncStream,
                                                 dict]] = asyncio.Queue()
         self.new_requests_event = asyncio.Event()
@@ -138,7 +139,7 @@ class RequestTracker:
         if request_output.finished:
             if verbose:
                 logger.info("Finished request %s.", request_id)
-            self.abort_request(request_id)
+            self.abort_request(request_id, is_exception = False)
 
     def process_exception(self,
                           request_id: str,
@@ -174,12 +175,13 @@ class RequestTracker:
 
         return stream
 
-    def abort_request(self, request_id: str, *, verbose: bool = False) -> None:
+    def abort_request(self, request_id: str, *, verbose: bool = False, is_exception: bool = True) -> None:
         """Abort a request during next background loop iteration."""
         if verbose:
             logger.info("Aborted request %s.", request_id)
 
-        self._finished_requests.put_nowait(request_id)
+        if (is_exception): self._finished_requests.put_nowait(request_id)
+        else: self._finished_requests_preserve.put_nowait(request_id)
 
         if request_id not in self._request_streams or self._request_streams[
                 request_id].finished:
@@ -193,10 +195,17 @@ class RequestTracker:
         sent to the engine."""
         new_requests: List[Dict] = []
         finished_requests: Set[str] = set()
+        finished_requests_preserve: Set[str] = set()
 
         while not self._finished_requests.empty():
             request_id = self._finished_requests.get_nowait()
             finished_requests.add(request_id)
+            self._request_streams.pop(request_id, None)
+
+
+        while not self._finished_requests_preserve.empty():
+            request_id = self._finished_requests.get_nowait()
+            finished_requests_preserve.add(request_id)
             self._request_streams.pop(request_id, None)
 
         while not self._new_requests.empty():
@@ -208,7 +217,7 @@ class RequestTracker:
             self._request_streams[stream.request_id] = stream
             new_requests.append(new_request)
 
-        return new_requests, finished_requests
+        return new_requests, finished_requests, finished_requests_preserve
 
     async def wait_for_new_requests(self):
         if not self.has_new_requests():
@@ -255,7 +264,7 @@ class _AsyncLLMEngine(LLMEngine):
         else:
             output = []
 
-        request_outputs = self._process_model_outputs(
+        request_outputs, session_id_blocks = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
@@ -265,7 +274,7 @@ class _AsyncLLMEngine(LLMEngine):
         # Tracing
         self.do_tracing(scheduler_outputs)
 
-        return request_outputs
+        return request_outputs, session_id_blocks
 
     async def stop_remote_worker_execution_loop_async(self) -> None:
         """Stop the remote worker execution loop."""
@@ -313,6 +322,7 @@ class _AsyncLLMEngine(LLMEngine):
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        session_id: Optional[str]=None
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
@@ -334,6 +344,7 @@ class _AsyncLLMEngine(LLMEngine):
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
             trace_headers=trace_headers,
+            session_id=session_id
         )
 
     async def check_health_async(self) -> None:
@@ -386,7 +397,7 @@ class AsyncLLMEngine:
         self._background_loop_unshielded: Optional[asyncio.Task] = None
         self.start_engine_loop = start_engine_loop
         self._errored_with: Optional[BaseException] = None
-
+        self._session_id_blocks = [[] for _ in range(len(self.engine.scheduler))]
         # Lazy initialized fields
         self._request_tracker: RequestTracker
 
@@ -551,7 +562,7 @@ class AsyncLLMEngine:
 
         Returns True if there are in-progress requests."""
 
-        new_requests, finished_requests = (
+        new_requests, finished_requests, finished_requests_preserve = (
             self._request_tracker.get_new_and_finished_requests())
 
         for new_request in new_requests:
@@ -574,10 +585,13 @@ class AsyncLLMEngine:
         if finished_requests:
             await self._engine_abort(finished_requests)
 
+        if finished_requests_preserve:
+            await self._engine_abort(finished_requests_preserve, False)
+
         if self.engine_use_ray:
-            request_outputs = await self.engine.step.remote()  # type: ignore
+            request_outputs, session_id_blocks = await self.engine.step.remote()  # type: ignore
         else:
-            request_outputs = await self.engine.step_async(virtual_engine)
+            request_outputs, session_id_blocks = await self.engine.step_async(virtual_engine)
 
         # Put the outputs into the corresponding streams.
         finished = True
@@ -586,13 +600,16 @@ class AsyncLLMEngine:
                 request_output, verbose=self.log_requests)
             finished = finished and request_output.finished
 
+        for session_id_block, _session_id_block in zip(session_id_blocks, self._session_id_blocks):
+            _session_id_block.update(session_id_block)
+
         return not finished
 
-    async def _engine_abort(self, request_ids: Iterable[str]):
+    async def _engine_abort(self, request_ids: Iterable[str], is_exception: bool = True):
         if self.engine_use_ray:
-            await self.engine.abort_request.remote(request_ids)  # type: ignore
+            await self.engine.abort_request.remote(request_ids, is_exception=is_exception)  # type: ignore
         else:
-            self.engine.abort_request(request_ids)
+            self.engine.abort_request(request_ids, is_exception=is_exception)
 
     async def run_engine_loop(self):
         if self.engine_use_ray:
@@ -669,7 +686,8 @@ class AsyncLLMEngine:
         arrival_time: Optional[float] = None,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        session_id: Optional[str] = None
     ) -> AsyncStream:
         if not self.is_running:
             if self.start_engine_loop:
@@ -692,7 +710,8 @@ class AsyncLLMEngine:
             arrival_time=arrival_time,
             lora_request=lora_request,
             trace_headers=trace_headers,
-            prompt_adapter_request=prompt_adapter_request)
+            prompt_adapter_request=prompt_adapter_request,
+            session_id = session_id)
 
         return stream
 
@@ -703,7 +722,8 @@ class AsyncLLMEngine:
         request_id: str,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
-        prompt_adapter_request: Optional[PromptAdapterRequest] = None
+        prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        session_id: Optional[str] = None
     ) -> AsyncIterator[RequestOutput]:
         """Generate outputs for a request.
 
@@ -776,6 +796,7 @@ class AsyncLLMEngine:
                 lora_request=lora_request,
                 trace_headers=trace_headers,
                 prompt_adapter_request=prompt_adapter_request,
+                session_id=session_id,
         ):
             yield LLMEngine.validate_output(output, RequestOutput)
 
@@ -783,7 +804,9 @@ class AsyncLLMEngine:
             self,
             session_id: str
     ):
-        raise NotImplementedError
+        if not session_id in self._session_id_blocks:
+            return
+        self.engine.free_session(session_id, self._session_id_blocks) # noqa E501
     
     async def encode(
         self,
@@ -871,6 +894,7 @@ class AsyncLLMEngine:
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        session_id: Optional[str] = None,
     ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Common logic to process requests with SamplingParams or
         PoolingParams."""
@@ -884,6 +908,7 @@ class AsyncLLMEngine:
             lora_request=lora_request,
             trace_headers=trace_headers,
             prompt_adapter_request=prompt_adapter_request,
+            session_id = session_id,
         )
 
         try:
