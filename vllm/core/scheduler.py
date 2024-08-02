@@ -322,6 +322,8 @@ class Scheduler:
         self.last_prompt_latency = 0.0
         # preemption mode, RECOMPUTE or SWAP
         self.user_specified_preemption_mode = scheduler_config.preemption_mode
+        # Finished sequence but their sequence group has not finished
+        self._finished_queue: Deque[Sequence] = deque()
 
         # The following field is test-only. It is used to inject artificial
         # preemption.
@@ -469,6 +471,7 @@ class Scheduler:
                     victim_seq: Sequence = finished_queue[0]
                     if (victim_seq.n_blocks() <= required_slot):
                         self.free_seq(victim_seq)
+                        victim_seq.finished_removed += victim_seq.n_blocks()
                         finished_queue.popleft()
                     else:
                         self.free_finished_seq(victim_seq_group, required_slot)
@@ -661,6 +664,7 @@ class Scheduler:
         budget: SchedulingBudget,
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
+        finished_queue: deque = None,
     ) -> Tuple[deque, SchedulerPrefillOutputs]:
         """Schedule sequence groups that are in prefill stage.
 
@@ -820,7 +824,8 @@ class Scheduler:
                 budget,
                 curr_loras,
                 fcfs_policy,
-                enable_chunking=False)
+                enable_chunking=False,
+                finished_queue=self._finished_queue)
 
             # If any sequence group is preempted, do not swap in any sequence
             # group. because it means there's no slot for new running requests.
@@ -904,7 +909,8 @@ class Scheduler:
             budget,
             curr_loras,
             fcfs_policy,
-            enable_chunking=True)
+            enable_chunking=True,
+            finished_queue=self._finished_queue)
 
         # Schedule swapped out requests.
         # If preemption happens, it means we don't have space for swap-in.
@@ -1080,6 +1086,7 @@ class Scheduler:
         self.block_manager.free_last_blocks(seq, num_blocks)
 
     def free_finished_seq_groups(self) -> None:
+        new_finished_queue = deque()
         session_id_block = {}
         for queue in [self.running, self.swapped, self.waiting]:
             for seq_group in queue:
@@ -1088,12 +1095,17 @@ class Scheduler:
                     if session_id := seq_group.session_id: 
                         assert len(seq_group._finished_seq) == 1
                         seq = seq_group._finished_seq[0]
-                        if seq.seq_id in self.block_manager.block_tables: #if not, it has already been freed.
+                        if seq.n_blocks() > 0: #if not, it has already been freed.
                             session_id_block[session_id] = seq.seq_id
                     else:
                         for seq in seq_group.get_seqs():
                             self.free_seq(seq)
+                else:
+                    for seq in seq_group._finished_seq:
+                        if seq.n_blocks() > 0: #if not, it has already been freed.
+                           new_finished_queue.append(seq)
         
+        self._finished_queue = new_finished_queue
         self.running = deque(seq_group for seq_group in self.running
                              if not seq_group.is_finished())
         return session_id_block

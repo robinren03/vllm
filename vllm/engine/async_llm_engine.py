@@ -263,7 +263,7 @@ class _AsyncLLMEngine(LLMEngine):
                 execute_model_req)
         else:
             output = []
-
+        
         request_outputs, session_id_blocks = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)

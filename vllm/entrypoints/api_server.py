@@ -20,6 +20,7 @@ from vllm.logger import init_logger
 from vllm.sampling_params import SamplingParams
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils import FlexibleArgumentParser, random_uuid
+import asyncio
 
 logger = init_logger("vllm.entrypoints.api_server")
 
@@ -33,6 +34,18 @@ async def health() -> Response:
     """Health check."""
     return Response(status_code=200)
 
+@app.get("/exit")  
+async def exit() -> Response:  
+    """Exit the engine after responding to the request."""  
+    asyncio.create_task(schedule_exit())  
+    return Response(content="Shutting down...", status_code=200)  
+
+async def schedule_exit(delay: float = 0.5) -> None:  
+    """Schedules the application to exit after a short delay."""  
+    import os, signal
+    await asyncio.sleep(delay)  # 等待足够的时间来发送HTTP响应  
+    os.kill(os.getpid(), signal.SIGINT)  
+    
 
 @app.post("/generate")
 async def generate(request: Request) -> Response:
