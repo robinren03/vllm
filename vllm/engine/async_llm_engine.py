@@ -397,7 +397,7 @@ class AsyncLLMEngine:
         self._background_loop_unshielded: Optional[asyncio.Task] = None
         self.start_engine_loop = start_engine_loop
         self._errored_with: Optional[BaseException] = None
-        self._session_id_blocks = [[] for _ in range(len(self.engine.scheduler))]
+        self._session_id_blocks = [{} for _ in range(len(self.engine.scheduler))]
         # Lazy initialized fields
         self._request_tracker: RequestTracker
 

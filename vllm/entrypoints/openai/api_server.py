@@ -89,6 +89,18 @@ async def health() -> Response:
     await openai_serving_chat.engine.check_health()
     return Response(status_code=200)
 
+@router.get("/exit")  
+async def exit() -> Response:  
+    """Exit the engine after responding to the request."""  
+    asyncio.create_task(schedule_exit())  
+    return Response(content="Shutting down...", status_code=200)  
+
+async def schedule_exit(delay: float = 0.5) -> None:  
+    """Schedules the application to exit after a short delay."""  
+    import os, signal
+    await asyncio.sleep(delay)  # 等待足够的时间来发送HTTP响应  
+    os.kill(os.getpid(), signal.SIGINT)  
+
 
 @router.post("/tokenize")
 async def tokenize(request: TokenizeRequest):
@@ -127,6 +139,13 @@ async def show_version():
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
+    if request.stop:
+        if result := openai_serving_chat.remove_session(request.session_id):
+            return JSONResponse(content=result.model_dump())
+        else:
+            return JSONResponse(content=result.model_dump(),
+                                status_code=500)
+        
     generator = await openai_serving_chat.create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):

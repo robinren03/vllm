@@ -119,6 +119,9 @@ class ChatCompletionRequest(OpenAIBaseModel):
                                 ChatCompletionNamedToolChoiceParam]] = "none"
     user: Optional[str] = None
 
+    session_id: Optional[str] = None
+    stop: Optional[bool] = False
+    
     # doc: begin-chat-completion-sampling-params
     best_of: Optional[int] = None
     use_beam_search: bool = False

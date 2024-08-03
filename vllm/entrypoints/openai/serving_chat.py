@@ -65,6 +65,12 @@ class OpenAIServingChat(OpenAIServing):
         # If this is None we use the tokenizer's default chat template
         self.chat_template = load_chat_template(chat_template)
 
+    async def remove_session(
+            self,
+            session_id: str
+    ) -> bool:
+        return await self.engine.remove_session(session_id)
+    
     async def create_chat_completion(
         self,
         request: ChatCompletionRequest,
@@ -135,6 +141,11 @@ class OpenAIServingChat(OpenAIServing):
         request_id = f"chat-{random_uuid()}"
         try:
             sampling_params = request.to_sampling_params()
+            session_id = request.session_id
+    
+            if sampling_params.n != 1 and session_id: # Sessionize only when 1 output needed
+                return self.create_error_response("n!=1 not supported for a session")
+                
             decoding_config = await self.engine.get_decoding_config()
             guided_decoding_backend = request.guided_decoding_backend \
                 or decoding_config.guided_decoding_backend
