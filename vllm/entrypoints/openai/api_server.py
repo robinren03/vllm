@@ -139,7 +139,7 @@ async def show_version():
 @router.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
-    if request.stop:
+    if request.request_stop:
         if result := openai_serving_chat.remove_session(request.session_id):
             return JSONResponse(content=result.model_dump())
         else:

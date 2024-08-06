@@ -120,7 +120,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     user: Optional[str] = None
 
     session_id: Optional[str] = None
-    stop: Optional[bool] = False
+    request_stop: Optional[bool] = False
     
     # doc: begin-chat-completion-sampling-params
     best_of: Optional[int] = None

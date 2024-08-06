@@ -61,7 +61,7 @@ async def generate(request: Request) -> Response:
     request_dict = await request.json()
     prompt = request_dict.pop("prompt")
     stream = request_dict.pop("stream", False)
-    stop = request_dict.pop("stop", None)
+    request_stop = request_dict.pop("request_stop", None)
     session_id = request_dict.pop("session_id", None)
     
     sampling_params = SamplingParams(**request_dict)
