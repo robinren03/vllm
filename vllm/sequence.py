@@ -316,6 +316,7 @@ class Sequence:
 
     @property
     def n_blocks(self) -> int:
+        assert (self.finished_removed == 0 or self.status == SequenceStatus.FINISHED_STOPPED or self.status == SequenceStatus.FINISHED_LENGTH_CAPPED)
         return math.ceil(self.get_len() / self.block_size) - self.finished_removed
 
     @property
@@ -482,6 +483,7 @@ class SequenceGroup:
         encoder_seq: Optional[Sequence] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        computed_block_seq: Optional[int] = None
     ) -> None:
         self.request_id = request_id
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
@@ -503,6 +505,8 @@ class SequenceGroup:
         self._first_seq = next(iter(self.seqs_dict.values()))
         # self._finished_seq = SequenceGroupMinHeap()
         self._finished_seq: List[Sequence] = []
+        self.computed_block_seq = computed_block_seq
+        self.computed_block_nums: List[int] = None
 
     @property
     def prompt(self) -> Optional[str]:
@@ -541,7 +545,7 @@ class SequenceGroup:
             return seq
         
         if len(self._finished_seq) < self.sampling_params.n:
-            self._finished_seq.push(seq)
+            self._finished_seq.append(seq)
             return None
         
         assert len(self._finished_seq) == self.sampling_params.n
@@ -752,6 +756,7 @@ class SequenceGroupMetadata:
         encoder_seq_data: Optional[SequenceData] = None,
         cross_block_table: Optional[List[int]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+        session_id: Optional[str] = None
     ) -> None:
         self.request_id = request_id
         self.is_prompt = is_prompt
@@ -768,6 +773,7 @@ class SequenceGroupMetadata:
         self.cross_block_table = cross_block_table
         self._token_chunk_size = token_chunk_size
         self.do_sample = do_sample
+        self.session_id = session_id
 
         # The number of speculative tokens adopted in this request.
         # None means specuative decoding is not used.

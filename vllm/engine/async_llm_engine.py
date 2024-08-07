@@ -204,7 +204,7 @@ class RequestTracker:
 
 
         while not self._finished_requests_preserve.empty():
-            request_id = self._finished_requests.get_nowait()
+            request_id = self._finished_requests_preserve.get_nowait()
             finished_requests_preserve.add(request_id)
             self._request_streams.pop(request_id, None)
 
@@ -264,7 +264,7 @@ class _AsyncLLMEngine(LLMEngine):
         else:
             output = []
         
-        request_outputs, session_id_blocks = self._process_model_outputs(
+        request_outputs = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
@@ -274,7 +274,7 @@ class _AsyncLLMEngine(LLMEngine):
         # Tracing
         self.do_tracing(scheduler_outputs)
 
-        return request_outputs, session_id_blocks
+        return request_outputs
 
     async def stop_remote_worker_execution_loop_async(self) -> None:
         """Stop the remote worker execution loop."""
@@ -397,7 +397,6 @@ class AsyncLLMEngine:
         self._background_loop_unshielded: Optional[asyncio.Task] = None
         self.start_engine_loop = start_engine_loop
         self._errored_with: Optional[BaseException] = None
-        self._session_id_blocks = [{} for _ in range(len(self.engine.scheduler))]
         # Lazy initialized fields
         self._request_tracker: RequestTracker
 
@@ -589,9 +588,9 @@ class AsyncLLMEngine:
             await self._engine_abort(finished_requests_preserve, False)
 
         if self.engine_use_ray:
-            request_outputs, session_id_blocks = await self.engine.step.remote()  # type: ignore
+            request_outputs = await self.engine.step.remote()  # type: ignore
         else:
-            request_outputs, session_id_blocks = await self.engine.step_async(virtual_engine)
+            request_outputs = await self.engine.step_async(virtual_engine)
 
         # Put the outputs into the corresponding streams.
         finished = True
@@ -599,9 +598,6 @@ class AsyncLLMEngine:
             self._request_tracker.process_request_output(
                 request_output, verbose=self.log_requests)
             finished = finished and request_output.finished
-
-        for session_id_block, _session_id_block in zip(session_id_blocks, self._session_id_blocks):
-            _session_id_block.update(session_id_block)
 
         return not finished
 
@@ -804,9 +800,7 @@ class AsyncLLMEngine:
             self,
             session_id: str
     ):
-        if not session_id in self._session_id_blocks:
-            return
-        self.engine.free_session(session_id, self._session_id_blocks) # noqa E501
+        self.engine.free_session(session_id)
     
     async def encode(
         self,

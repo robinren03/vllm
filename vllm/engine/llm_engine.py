@@ -233,7 +233,6 @@ class LLMEngine:
         self.observability_config = observability_config or ObservabilityConfig(
         )
         self.log_stats = log_stats
-
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
             self.detokenizer = Detokenizer(self.tokenizer)
@@ -315,6 +314,8 @@ class LLMEngine:
             for _ in range(parallel_config.pipeline_parallel_size)
         ]
 
+        self.session_id_blocks = [{} for _ in range(parallel_config.pipeline_parallel_size)]
+
         # Metric Logging.
         if self.log_stats:
             if stat_loggers is not None:
@@ -376,12 +377,12 @@ class LLMEngine:
 
         self.model_executor.initialize_cache(num_gpu_blocks, num_cpu_blocks)
 
-    def free_session(self, session_id: str, session_block_ids) -> None:
+    def free_session(self, session_id: str) -> None:
         """Free the session's resources."""
-        for scheduler, session_block_id in zip(self.scheduler, session_block_ids):
+        for scheduler, session_block_id in zip(self.scheduler, self.session_id_blocks):
             if session_id in session_block_id:
-                scheduler.free_seq(session_block_id[session_id])
-                del session_block_id[session_id]
+                scheduler.free_seq(self.session_block_id[session_id])
+                del self.session_block_id[session_id]
 
     @classmethod
     def _get_executor_cls(cls,
@@ -564,13 +565,24 @@ class LLMEngine:
         else:
             raise ValueError(
                 "Either SamplingParams or PoolingParams must be provided.")
-
-        # Add the sequence group to the scheduler with least unfinished seqs.
+        
+        preferred_scheduler = None
         costs = [
-            scheduler.get_num_unfinished_seq_groups()
-            for scheduler in self.scheduler
-        ]
-        min_cost_scheduler = self.scheduler[costs.index(min(costs))]
+                scheduler.get_num_unfinished_seq_groups()
+                for scheduler in self.scheduler
+            ]
+        min_cost = min(costs)
+        preferred_scheduler = costs.index(min_cost)
+
+        if session_id is not None:
+            for idx, session_id_block in enumerate(self.session_id_blocks):
+                if session_id in session_id_block and costs[idx]<min_cost*2:
+                    preferred_scheduler = idx
+                    seq_group.computed_block_seq = session_id_block[session_id]
+                    del session_id_block[session_id]
+                    break
+        
+        min_cost_scheduler = self.scheduler[preferred_scheduler]
         min_cost_scheduler.add_seq_group(seq_group)
 
     def stop_remote_worker_execution_loop(self) -> None:
@@ -719,7 +731,8 @@ class LLMEngine:
             lora_request=lora_request,
             trace_headers=trace_headers,
             prompt_adapter_request=prompt_adapter_request,
-            session_id=session_id)
+            session_id=session_id
+            )
 
         return seq_group
 
@@ -838,11 +851,9 @@ class LLMEngine:
             if seq_group_meta.do_sample:
                 self.output_processor.process_outputs(seq_group, outputs)
 
-        # Free the finished sequence groups.
-        session_id_blocks = []
-        for scheduler in self.scheduler:
+        for idx, scheduler in enumerate(self.scheduler):
             session_id_block = scheduler.free_finished_seq_groups()
-            session_id_blocks.append(session_id_block)
+            self.session_id_blocks[idx].update(session_id_block)
 
         # Create the outputs.
         request_outputs: List[Union[RequestOutput,
@@ -855,7 +866,7 @@ class LLMEngine:
         for seq_group in ignored_seq_groups:
             request_output = RequestOutputFactory.create(seq_group)
             request_outputs.append(request_output)
-        return request_outputs, session_id_blocks
+        return request_outputs
 
     def step(self) -> List[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Performs one decoding iteration and returns newly generated results.
@@ -931,7 +942,7 @@ class LLMEngine:
         else:
             output = []
 
-        request_outputs, session_id_blocks = self._process_model_outputs(
+        request_outputs = self._process_model_outputs(
             output, scheduler_outputs.scheduled_seq_groups,
             scheduler_outputs.ignored_seq_groups, seq_group_metadata_list)
 
@@ -949,7 +960,7 @@ class LLMEngine:
             # queued control plane messages, such as add/remove lora adapters.
             self.model_executor.stop_remote_worker_execution_loop()
 
-        return request_outputs, session_id_blocks
+        return request_outputs
 
     def add_logger(self, logger_name: str, logger: StatLoggerBase) -> None:
         if logger_name in self.stat_loggers:

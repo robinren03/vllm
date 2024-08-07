@@ -194,6 +194,7 @@ class OpenAIServingChat(OpenAIServing):
                 lora_request=lora_request,
                 trace_headers=trace_headers,
                 prompt_adapter_request=prompt_adapter_request,
+                session_id=session_id
             )
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error

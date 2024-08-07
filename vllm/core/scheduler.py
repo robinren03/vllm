@@ -1021,9 +1021,12 @@ class Scheduler:
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
                 self.block_manager.access_all_blocks_in_seq(seq, now)
 
-            common_computed_block_nums = (
-                self.block_manager.get_common_computed_block_ids(
-                    seq_group.get_seqs(status=SequenceStatus.RUNNING)))
+            if seq_group.computed_block_seq is None:
+                common_computed_block_nums = (
+                    self.block_manager.get_common_computed_block_ids(
+                        seq_group.get_seqs(status=SequenceStatus.RUNNING)))
+            else:
+                common_computed_block_nums = seq_group.computed_block_nums
 
             do_sample = True
             if seq_group.is_prefill():
@@ -1061,6 +1064,7 @@ class Scheduler:
                 multi_modal_data=seq_group.multi_modal_data
                 if scheduler_outputs.num_prefill_groups > 0 else None,
                 prompt_adapter_request=seq_group.prompt_adapter_request,
+                session_id=seq_group.session_id,
             )
             seq_group_metadata_list.append(seq_group_metadata)
 
@@ -1095,14 +1099,14 @@ class Scheduler:
                     if session_id := seq_group.session_id: 
                         assert len(seq_group._finished_seq) == 1
                         seq = seq_group._finished_seq[0]
-                        if seq.n_blocks() > 0: #if not, it has already been freed.
+                        if seq.n_blocks > 0: #if not, it has already been freed.
                             session_id_block[session_id] = seq.seq_id
                     else:
                         for seq in seq_group.get_seqs():
                             self.free_seq(seq)
                 else:
                     for seq in seq_group._finished_seq:
-                        if seq.n_blocks() > 0: #if not, it has already been freed.
+                        if seq.n_blocks > 0: #if not, it has already been freed.
                            new_finished_queue.append(seq)
         
         self._finished_queue = new_finished_queue
@@ -1188,6 +1192,8 @@ class Scheduler:
         seq_group: SequenceGroup,
     ) -> None:
         seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
+        seq_group.computed_block_seq = None
+        seq_group.computed_block_nums = None
         assert len(seqs) == 1
         for seq in seqs:
             seq.status = SequenceStatus.WAITING

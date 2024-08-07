@@ -271,7 +271,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 
         self_num_required_blocks = self._get_seq_num_required_blocks(
-            seq_group.get_seqs(status=SequenceStatus.WAITING)[0])
+            seq_group.get_seqs(status=SequenceStatus.WAITING)[0]) - len(self.block_tables.get(seq_group.computed_block_seq, []))
         cross_num_required_blocks = self._get_seq_num_required_blocks(
             seq_group.get_encoder_seq())
         num_required_blocks = self_num_required_blocks + \
@@ -294,12 +294,19 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
     def _allocate_sequence(self, \
                            seq: Sequence, \
+                           computed_block_seq: int, \
                            ref_count: int, \
                            is_encoder_decoder: bool = True) -> BlockTable:
         # Allocate new physical token blocks that will store the prompt tokens.
         num_prompt_blocks = seq.n_blocks
-
-        block_table: BlockTable = []
+        block_table: BlockTable = self.block_tables.get(computed_block_seq, [])
+        for block in block_table:
+            block.ref_count += ref_count - 1
+        
+        computed_len = len(block_table)
+        if (computed_len > 0):
+            del self.block_tables[computed_block_seq]
+            
         for logical_idx in range(num_prompt_blocks):
             if (self.block_sliding_window is not None
                     and logical_idx >= self.block_sliding_window):
@@ -316,7 +323,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 block.ref_count = ref_count
             block_table.append(block)
 
-        return block_table
+        return block_table, computed_len
 
     def allocate(self, seq_group: SequenceGroup) -> None:
         is_encoder_decoder = seq_group.is_encoder_decoder()
@@ -327,11 +334,18 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # NOTE: Here we assume that all sequences in the group have the same
         # decoder prompt.
         seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
-        block_table: BlockTable = \
+        computed_block_seq = seq_group.computed_block_seq
+
+        result = \
             self._allocate_sequence(seq,
+                                    computed_block_seq,
                                     seq_group.num_seqs(),
                                     is_encoder_decoder)
 
+        block_table: BlockTable = result[0]
+        computed_len: int = result[1]
+        
+        seq_group.computed_block_nums =[block.block_number for block in block_table[:computed_len]]
         # Assign the self-attention block tables for each sequence.
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
             self.block_tables[seq.seq_id] = block_table.copy()
@@ -712,6 +726,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         Used in prefill (can skip prefill of some blocks).
         """
         # Can return non-empty result only with prefix caching enabled.
+        
         if not self.enable_caching:
             return []
 

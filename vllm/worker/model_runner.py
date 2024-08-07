@@ -360,6 +360,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         computed_block_nums = inter_data.computed_block_nums
 
         # Note that prefix caching does not support sliding window.
+        # if (computed_block_nums is not None): print(f"Pre-Hit Cache of {len(computed_block_nums)}")
+        # else: print(f"Pre-Hit Cache of 0")
         prefix_cache_hit = (computed_block_nums is not None
                             and len(computed_block_nums) > 0
                             and self.sliding_window is None
@@ -375,6 +377,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         if prefix_cache_hit:
             assert computed_block_nums is not None
             context_len = len(computed_block_nums) * self.block_size
+            # print(f"Hit Cache of {context_len}")
             inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
                 seq_idx][context_len:]
             inter_data.input_positions[seq_idx] = inter_data.input_positions[
@@ -1409,7 +1412,7 @@ class CUDAGraphRunner:
         self.flashinfer_indices_buffer: Optional[torch.Tensor] = None
         self.flashinfer_last_page_len_buffer: Optional[torch.Tensor] = None
         self.flashinfer_decode_wrapper: Optional[
-            CUDAGraphBatchDecodeWithPagedKVCacheWrapper] = None
+            CUDAGraphBatchDecodeWithPagedKVCacheWrapper] = None # type: ignore
 
     @property
     def graph(self):

@@ -68,7 +68,7 @@ async def generate(request: Request) -> Response:
     if sampling_params.n != 1 and session_id: # Sessionize only when 1 output needed
         return Response(status_code=501, content="n!=1 not supported")
     
-    if stop:
+    if request_stop:
         if result:=engine.remove_session(session_id) == True:
             return Response(status_code=200)
         else:
