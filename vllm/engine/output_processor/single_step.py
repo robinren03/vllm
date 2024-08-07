@@ -156,8 +156,11 @@ class SingleStepOutputProcessor(SequenceGroupOutputProcessor):
             # old sequences.
             for seq, parent in child_seqs:
                 if seq is parent and seq.is_finished():
+                    if seq.get_len() % seq.block_size != 0:
+                        print(f"Current len:{seq.get_len()}, Block size: {seq.block_size}, n_block: {seq.n_blocks}")
+                        for scheduler in self.scheduler:
+                            scheduler.free_finished_seq(seq, 1)
                     seq_to_remove = seq_group.save_request(seq)
-                    print(f"Removed the sequence, freed!? {seq_to_remove is not None}")
                     if seq_to_remove is not None:
                         for scheduler in self.scheduler:
                             scheduler.free_seq(seq_to_remove)

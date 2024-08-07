@@ -576,7 +576,7 @@ class LLMEngine:
 
         if session_id is not None:
             for idx, session_id_block in enumerate(self.session_id_blocks):
-                if session_id in session_id_block and costs[idx]<min_cost*2:
+                if session_id in session_id_block and costs[idx]<=min_cost*2+1:
                     preferred_scheduler = idx
                     seq_group.computed_block_seq = session_id_block[session_id]
                     del session_id_block[session_id]
@@ -854,7 +854,8 @@ class LLMEngine:
         for idx, scheduler in enumerate(self.scheduler):
             session_id_block = scheduler.free_finished_seq_groups()
             self.session_id_blocks[idx].update(session_id_block)
-
+            # if len(session_id_blockprint(self.session_id_blocks[idx], session_id_block)
+        
         # Create the outputs.
         request_outputs: List[Union[RequestOutput,
                                     EmbeddingRequestOutput]] = []

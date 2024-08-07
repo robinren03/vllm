@@ -377,7 +377,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         if prefix_cache_hit:
             assert computed_block_nums is not None
             context_len = len(computed_block_nums) * self.block_size
-            # print(f"Hit Cache of {context_len}")
+            print(f"Hit Cache of {context_len}")
             inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
                 seq_idx][context_len:]
             inter_data.input_positions[seq_idx] = inter_data.input_positions[
