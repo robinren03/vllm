@@ -306,7 +306,13 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         computed_len = len(block_table)
         if (computed_len > 0):
             del self.block_tables[computed_block_seq]
-            
+        
+        if (computed_len > seq.n_blocks):
+            for i in range(seq.n_blocks, computed_len):
+                self.gpu_allocator.free(block_table[i])
+            computed_len = seq.block_size
+        
+        num_prompt_blocks = seq.n_blocks - computed_len
         for logical_idx in range(num_prompt_blocks):
             if (self.block_sliding_window is not None
                     and logical_idx >= self.block_sliding_window):

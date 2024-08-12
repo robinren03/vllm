@@ -1027,6 +1027,8 @@ class Scheduler:
                         seq_group.get_seqs(status=SequenceStatus.RUNNING)))
             else:
                 common_computed_block_nums = seq_group.computed_block_nums
+            
+            print(f"Computed block seq: {seq_group.computed_block_seq}, common_computed_block_nums: {common_computed_block_nums}")
 
             do_sample = True
             if seq_group.is_prefill():
@@ -1099,10 +1101,8 @@ class Scheduler:
                     if session_id := seq_group.session_id: 
                         assert len(seq_group._finished_seq) == 1
                         seq = seq_group._finished_seq[0]
-                        print(f"session_id: {session_id}, seq_id: {seq.seq_id}, n_block:{seq.n_blocks}, finished_removed:{seq.finished_removed}")
                         if seq.n_blocks > 0: #if not, it has already been freed.
                             session_id_block[session_id] = seq.seq_id
-                            print(session_id_block)
                     else:
                         for seq in seq_group.get_seqs():
                             self.free_seq(seq)

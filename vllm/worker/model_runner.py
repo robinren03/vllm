@@ -367,6 +367,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                             and self.sliding_window is None
                             and inter_data.is_prompt)
         inter_data.prefix_cache_hit = prefix_cache_hit
+        # print(f"Prefix cacheing hitting? {prefix_cache_hit} {computed_block_nums} {self.sliding_window} {inter_data.is_prompt}")
         if self.chunked_prefill_enabled and prefix_cache_hit:
             raise RuntimeError(
                 "chunked prefill cannot be used with prefix caching now.")
@@ -377,7 +378,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         if prefix_cache_hit:
             assert computed_block_nums is not None
             context_len = len(computed_block_nums) * self.block_size
-            print(f"Hit Cache of {context_len}")
             inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
                 seq_idx][context_len:]
             inter_data.input_positions[seq_idx] = inter_data.input_positions[
