@@ -476,6 +476,7 @@ class SequenceGroup:
         seqs: List[Sequence],
         arrival_time: float,
         session_id: Optional[str] = None,
+        session_reuse: Optional[int] = -1,
         sampling_params: Optional[SamplingParams] = None,
         lora_request: Optional[LoRARequest] = None,
         embeddings: Optional[List[float]] = None,
@@ -489,6 +490,7 @@ class SequenceGroup:
         self.seqs_dict = {seq.seq_id: seq for seq in seqs}
         self.sampling_params = sampling_params
         self.session_id = session_id
+        self.session_reuse = session_reuse
         self.metrics = RequestMetrics(arrival_time=arrival_time,
                                       last_token_time=arrival_time,
                                       first_scheduled_time=None,

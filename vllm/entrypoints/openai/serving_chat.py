@@ -11,7 +11,8 @@ from vllm.config import ModelConfig
 from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.entrypoints.chat_utils import (ConversationMessage,
                                          load_chat_template,
-                                         parse_chat_message_content)
+                                         parse_chat_message_content,
+                                         find_kth_subseq_position)
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
@@ -142,6 +143,7 @@ class OpenAIServingChat(OpenAIServing):
         try:
             sampling_params = request.to_sampling_params()
             session_id = request.session_id
+            session_reuse = request.session_reuse
     
             if sampling_params.n != 1 and session_id: # Sessionize only when 1 output needed
                 return self.create_error_response("n!=1 not supported for a session")
@@ -176,6 +178,10 @@ class OpenAIServingChat(OpenAIServing):
             engine_inputs: PromptInputs = {
                 "prompt_token_ids": prompt_inputs["prompt_token_ids"],
             }
+            
+            if "Meta-Llama-3-8B-Instruct" in request.model:
+                session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse)
+
             if mm_data is not None:
                 engine_inputs["multi_modal_data"] = mm_data
 
@@ -187,7 +193,6 @@ class OpenAIServingChat(OpenAIServing):
                     and contains_trace_headers(raw_request.headers)):
                 log_tracing_disabled_warning()
 
-            print("Session id at request", session_id)
             result_generator = self.engine.generate(
                 engine_inputs,
                 sampling_params,
@@ -195,7 +200,8 @@ class OpenAIServingChat(OpenAIServing):
                 lora_request=lora_request,
                 trace_headers=trace_headers,
                 prompt_adapter_request=prompt_adapter_request,
-                session_id=session_id
+                session_id=session_id,
+                session_reuse = session_reuse
             )
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error

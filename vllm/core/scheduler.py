@@ -1028,7 +1028,7 @@ class Scheduler:
             else:
                 common_computed_block_nums = seq_group.computed_block_nums
             
-            print(f"Computed block seq: {seq_group.computed_block_seq}, common_computed_block_nums: {common_computed_block_nums}")
+            # print(f"Computed block seq: {seq_group.computed_block_seq}, common_computed_block_nums: {common_computed_block_nums}")
 
             do_sample = True
             if seq_group.is_prefill():

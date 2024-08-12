@@ -322,7 +322,8 @@ class _AsyncLLMEngine(LLMEngine):
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-        session_id: Optional[str]=None
+        session_id: Optional[str]=None,
+        session_reuse: Optional[int]=-1
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
@@ -344,7 +345,8 @@ class _AsyncLLMEngine(LLMEngine):
             lora_request=lora_request,
             prompt_adapter_request=prompt_adapter_request,
             trace_headers=trace_headers,
-            session_id=session_id
+            session_id=session_id,
+            session_reuse=session_reuse
         )
 
     async def check_health_async(self) -> None:
@@ -683,7 +685,8 @@ class AsyncLLMEngine:
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        session_reuse: Optional[int] = -1
     ) -> AsyncStream:
         if not self.is_running:
             if self.start_engine_loop:
@@ -707,7 +710,8 @@ class AsyncLLMEngine:
             lora_request=lora_request,
             trace_headers=trace_headers,
             prompt_adapter_request=prompt_adapter_request,
-            session_id = session_id)
+            session_id = session_id,
+            session_reuse = session_reuse)
 
         return stream
 
@@ -719,7 +723,8 @@ class AsyncLLMEngine:
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        session_reuse: Optional[int] = -1
     ) -> AsyncIterator[RequestOutput]:
         """Generate outputs for a request.
 
@@ -793,6 +798,7 @@ class AsyncLLMEngine:
                 trace_headers=trace_headers,
                 prompt_adapter_request=prompt_adapter_request,
                 session_id=session_id,
+                session_reuse=session_reuse
         ):
             yield LLMEngine.validate_output(output, RequestOutput)
 
@@ -889,6 +895,7 @@ class AsyncLLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
+        session_reuse: Optional[int] = -1
     ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Common logic to process requests with SamplingParams or
         PoolingParams."""
@@ -903,6 +910,7 @@ class AsyncLLMEngine:
             trace_headers=trace_headers,
             prompt_adapter_request=prompt_adapter_request,
             session_id = session_id,
+            session_reuse = session_reuse
         )
 
         try:

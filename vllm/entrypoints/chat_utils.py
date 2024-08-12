@@ -190,3 +190,17 @@ def parse_chat_message_content(
 
     return _parse_chat_message_content_parts(role, content, model_config,
                                              tokenizer)
+
+def find_kth_subseq_position(input_seq, subseq, k):  
+    input_list = input_seq 
+    subseq_list = subseq
+    len_subseq = len(subseq_list)  
+    count = 0  
+    if (k == 0): return 0 
+    for start_idx in range(len(input_list) - len_subseq + 1):   
+        if input_list[start_idx:start_idx+len_subseq] == subseq_list:  
+            count += 1
+            if count == k:  
+                return start_idx 
+    
+    return -1
