@@ -582,7 +582,6 @@ class LLMEngine:
                 if session_id in session_id_block and costs[idx]<=min_cost*2+1:
                     preferred_scheduler = idx
                     seq_group.computed_block_seq = session_id_block[session_id]
-                    del session_id_block[session_id]
                     break
         
         min_cost_scheduler = self.scheduler[preferred_scheduler]
@@ -934,7 +933,7 @@ class LLMEngine:
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
-            0].schedule()
+            0].schedule(self.session_id_blocks[0])
 
         if not scheduler_outputs.is_empty():
             finished_requests_ids = self.scheduler[

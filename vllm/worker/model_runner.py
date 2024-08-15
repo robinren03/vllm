@@ -325,6 +325,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # Compute context length (the number of tokens that are
         # already computed) and sequence length (total number of tokens).
         seq_len = seq_data.get_len()
+
         if inter_data.is_prompt:
             context_len = seq_data.get_num_computed_tokens()
         else:
@@ -333,7 +334,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             # TODO(sang): Fix it.
             context_len = seq_len - 1
         seq_len = min(seq_len, context_len + token_chunk_size)
-
         # Compute tokens.
         if inter_data.is_prompt:
             tokens = seq_data.get_token_ids()[context_len:seq_len]
@@ -494,7 +494,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 per_seq_fn(inter_data, seq_idx, seq_group_metadata)
         for per_seq_group_fn in self.per_seq_group_compute_fns:
             per_seq_group_fn(inter_data, seq_group_metadata)
-
+        
     def _use_captured_graph(self, batch_size: int,
                             max_decode_seq_len: int) -> bool:
         return (self.decode_only and not self.runner.model_config.enforce_eager

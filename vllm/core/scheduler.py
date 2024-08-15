@@ -146,7 +146,11 @@ class SchedulerOutputs:
         # NOTE: We do not consider the ignored sequence groups.
         return (not self.scheduled_seq_groups and not self.blocks_to_swap_in
                 and not self.blocks_to_swap_out and not self.blocks_to_copy)
-
+    
+    def is_lazy(self) -> bool:
+        # NOTE: The output is lazy if no sequence groups are scheduled, but with pending ones.
+        return self.is_empty() and self.ignored_seq_groups
+    
     def _sort_by_lora_ids(self):
         self.scheduled_seq_groups = sorted(
             self.scheduled_seq_groups,
@@ -408,7 +412,8 @@ class Scheduler:
         curr_loras: Optional[Set[int]],
         policy: Policy,
         enable_chunking: bool = False,
-        finished_queue: deque = None
+        finished_queue: deque = None,
+        session_id_block: Dict[str, int] = None
     ) -> Tuple[deque, SchedulerRunningOutputs]:
         """Schedule sequence groups that are running.
 
@@ -475,7 +480,9 @@ class Scheduler:
                         finished_queue.popleft()
                     else:
                         self.free_finished_seq(victim_seq_group, required_slot)
-
+                elif session_id_block is not None and len(session_id_block) > 0:
+                    seq_id = session_id_block.pop()
+                    self.free_seq_id(seq_id)
                 elif running_queue:
                     # Preempt the lowest-priority sequence groups.
                     victim_seq_group = running_queue.pop()
@@ -499,6 +506,7 @@ class Scheduler:
                 self._append_slots(seq_group, blocks_to_copy)
                 is_prefill = seq_group.is_prefill()
                 if is_prefill:
+                    print("[Error] Prefill sequence group in running", seq_group.request_id)
                     prefill_seq_groups.append(
                         ScheduledSequenceGroup(
                             seq_group=seq_group,
@@ -664,7 +672,6 @@ class Scheduler:
         budget: SchedulingBudget,
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
-        finished_queue: deque = None,
     ) -> Tuple[deque, SchedulerPrefillOutputs]:
         """Schedule sequence groups that are in prefill stage.
 
@@ -706,9 +713,16 @@ class Scheduler:
             assert len(waiting_seqs) == 1, (
                 "Waiting sequence group should have only one prompt "
                 "sequence.")
+
+            # prefix_len = max(0, seq_group.session_reuse)
+            # block_table = self.block_manager.block_tables.get(seq_group.computed_block_seq, [])
+            # prefix_len = min(prefix_len, len(block_table) * self.cache_config.block_size)
+
             num_new_tokens = self._get_num_new_tokens(seq_group,
                                                       SequenceStatus.WAITING,
                                                       enable_chunking, budget)
+            # num_new_tokens = max(0, num_new_tokens)
+
             if not enable_chunking:
                 num_prompt_tokens = waiting_seqs[0].get_len()
                 assert num_new_tokens == num_prompt_tokens
@@ -758,7 +772,8 @@ class Scheduler:
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
                 break
-
+            
+            # num_new_tokens += prefix_len
             # Can schedule this request.
             if curr_loras is not None and lora_int_id > 0:
                 curr_loras.add(lora_int_id)
@@ -780,7 +795,7 @@ class Scheduler:
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(is_prefill=True))
 
-    def _schedule_default(self) -> SchedulerOutputs:
+    def _schedule_default(self, session_id_block:Dict[str, int]) -> SchedulerOutputs:
         """Schedule queued requests.
         
         The current policy is designed to optimize the throughput. First,
@@ -813,6 +828,11 @@ class Scheduler:
         if not self.swapped:
             remaining_waiting, prefills = self._schedule_prefills(
                 self.waiting, budget, curr_loras, enable_chunking=False)
+            for seq_group in prefills.seq_groups:
+                if type(seq_group) == ScheduledSequenceGroup:
+                    seq_group = seq_group.seq_group
+                if seq_group.session_id is not None and seq_group.session_id in session_id_block:
+                    del session_id_block[seq_group.session_id]
 
         fcfs_policy = PolicyFactory.get_policy(policy_name="fcfs")
         # Don't schedule decodes if prefills are scheduled.
@@ -825,7 +845,8 @@ class Scheduler:
                 curr_loras,
                 fcfs_policy,
                 enable_chunking=False,
-                finished_queue=self._finished_queue)
+                finished_queue=self._finished_queue,
+                session_id_block=session_id_block)
 
             # If any sequence group is preempted, do not swap in any sequence
             # group. because it means there's no slot for new running requests.
@@ -841,6 +862,7 @@ class Scheduler:
         # Update waiting requests.
         self.waiting = remaining_waiting
         self.waiting.extendleft(running_scheduled.preempted)
+
         # Update new running requests.
         self.running = remaining_running
         self.running.extend([s.seq_group for s in prefills.seq_groups])
@@ -848,6 +870,7 @@ class Scheduler:
             [s.seq_group for s in running_scheduled.decode_seq_groups])
         self.running.extend(
             [s.seq_group for s in swapped_in.decode_seq_groups])
+
         # Update swapped requests.
         self.swapped = remaining_swapped
         self.swapped.extend(running_scheduled.swapped_out)
@@ -858,7 +881,7 @@ class Scheduler:
         # doesn't allow chunked prefills.
         assert len(running_scheduled.prefill_seq_groups) == 0
         assert len(swapped_in.prefill_seq_groups) == 0
-        return SchedulerOutputs(
+        sched_output = SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
                                   running_scheduled.decode_seq_groups +
                                   swapped_in.decode_seq_groups),
@@ -874,6 +897,17 @@ class Scheduler:
             running_queue_size=len(self.running),
             preempted=preempted,
         )
+
+        if sched_output.is_lazy():
+            print("Lazy detection")
+            assert session_id_block
+            session_id, seq_id = list(session_id_block.items())[0] #TODO(yanyu): Use a better strategy
+            self.free_seq_id(seq_id)
+            del session_id_block[session_id]
+            return self._schedule_default(session_id_block)
+        else:
+            return sched_output
+        
 
     def _schedule_chunked_prefill(self):
         """Schedule queued requests.
@@ -966,12 +1000,12 @@ class Scheduler:
                        len(running_scheduled.swapped_out)),
         )
 
-    def _schedule(self) -> SchedulerOutputs:
+    def _schedule(self, session_id_block) -> SchedulerOutputs:
         """Schedule queued requests."""
         if self.scheduler_config.chunked_prefill_enabled:
             return self._schedule_chunked_prefill()
         else:
-            return self._schedule_default()
+            return self._schedule_default(session_id_block)
 
     def _can_append_slots(self, seq_group: SequenceGroup) -> bool:
         """Determine whether or not we have enough space in the KV cache to
@@ -995,11 +1029,11 @@ class Scheduler:
     def _required_slots(self, seq_group: SequenceGroup) -> int:
         return self.block_manager.get_append_required_blocks(seq_group)
     
-    def schedule(self) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
+    def schedule(self, session_id_blocks) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
-        scheduler_outputs = self._schedule()
+        scheduler_outputs = self._schedule(session_id_blocks)
         now = time.time()
 
         # Create input data structures.
@@ -1086,6 +1120,9 @@ class Scheduler:
     def free_seq(self, seq: Sequence) -> None:
         """Free a sequence from a block table."""
         self.block_manager.free(seq)
+
+    def free_seq_id(self, seq_id: int) -> None:
+        self.block_manager.free_seq_id(seq_id)
 
     def free_finished_seq(self, seq: Sequence, num_blocks: int) -> None:
         seq.finished_removed += num_blocks

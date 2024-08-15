@@ -302,10 +302,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         num_prompt_blocks = seq.n_blocks
         block_table: BlockTable = self.block_tables.get(computed_block_seq, [])
         
-        for block in block_table:
-            block.ref_count += ref_count - 1
-        
-        if (session_reuse ==-1): computed_len = len(block_table)
+        if (session_reuse == -1): computed_len = len(block_table)
         else:
             computed_len = min(len(block_table), session_reuse // self.block_size)
             for i in range(computed_len, len(block_table)):
@@ -320,6 +317,9 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 self.gpu_allocator.free(block_table[i])
             computed_len = seq.block_size
         
+        for block in block_table:
+            block.ref_count += ref_count - 1
+
         num_prompt_blocks = seq.n_blocks - computed_len
         for logical_idx in range(num_prompt_blocks):
             if (self.block_sliding_window is not None
@@ -337,6 +337,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 block.ref_count = ref_count
             block_table.append(block)
 
+        # seq.data._num_computed_tokens = computed_len * self.block_size
+        # print("Block table len:", len(block_table), ", Computed len:", computed_len)
         return block_table, computed_len
 
     def allocate(self, seq_group: SequenceGroup) -> None:
@@ -357,6 +359,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                                     seq_group.num_seqs(),
                                     is_encoder_decoder)
 
+        seq_group.computed_block_seq = None
+        seq_group.session_reuse = -1
         block_table: BlockTable = result[0]
         computed_len: int = result[1]
         
@@ -652,15 +656,22 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         self._free_block_table(block_table)
         del self.block_tables[seq.seq_id]
 
+    def free_seq_id(self, seq_id: int) -> None:
+        if seq_id not in self.block_tables:
+            # Already freed or haven't been scheduled yet.
+            return
+        block_table = self.block_tables[seq_id]
+        self._free_block_table(block_table)
+        del self.block_tables[seq_id]
+
     def free_last_blocks(self, seq: Sequence, num_blocks: int) -> None:
         if seq.seq_id not in self.block_tables:
             # Already freed or hasn't been scheduled yet.
             return
-        block_table = self.block_tables[seq.seq_id]
         for _ in range(num_blocks):
-            if not block_table:
-                break
-            block = block_table.pop()
+            # if not self.block_tables[seq.seq_id]:
+            #     break
+            block = self.block_tables[seq.seq_id].pop()
             if block.device == Device.GPU:
                 self.gpu_allocator.free(block)
             else:

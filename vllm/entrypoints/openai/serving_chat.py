@@ -205,6 +205,7 @@ class OpenAIServingChat(OpenAIServing):
             )
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error
+            logger.error("Error in generating chat completion: %s", e)
             return self.create_error_response(str(e))
 
         # Streaming response

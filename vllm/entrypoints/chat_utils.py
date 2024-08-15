@@ -196,7 +196,8 @@ def find_kth_subseq_position(input_seq, subseq, k):
     subseq_list = subseq
     len_subseq = len(subseq_list)  
     count = 0  
-    if (k == 0): return 0 
+    if (k < 0): return -1
+    if (k == 0): return 0
     for start_idx in range(len(input_list) - len_subseq + 1):   
         if input_list[start_idx:start_idx+len_subseq] == subseq_list:  
             count += 1

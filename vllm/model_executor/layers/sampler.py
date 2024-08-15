@@ -587,6 +587,7 @@ def _sample_with_torch(
                 sample_results = _greedy_sample(seq_groups, greedy_samples)
             elif sampling_type in (SamplingType.RANDOM,
                                    SamplingType.RANDOM_SEED):
+                # print("Sampling information:", multinomial_samples, multinomial_samples[sampling_type])
                 sample_results = _random_sample(
                     seq_groups, multinomial_samples[sampling_type])
             elif sampling_type == SamplingType.BEAM:
