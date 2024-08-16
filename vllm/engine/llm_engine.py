@@ -381,8 +381,8 @@ class LLMEngine:
         """Free the session's resources."""
         for scheduler, session_block_id in zip(self.scheduler, self.session_id_blocks):
             if session_id in session_block_id:
-                scheduler.free_seq(self.session_block_id[session_id])
-                del self.session_block_id[session_id]
+                scheduler.free_seq_id(session_block_id[session_id])
+                del session_block_id[session_id]
 
     @classmethod
     def _get_executor_cls(cls,

@@ -140,12 +140,9 @@ async def show_version():
 async def create_chat_completion(request: ChatCompletionRequest,
                                  raw_request: Request):
     if request.request_stop:
-        if result := openai_serving_chat.remove_session(request.session_id):
-            return JSONResponse(content=result.model_dump())
-        else:
-            return JSONResponse(content=result.model_dump(),
-                                status_code=500)
-        
+        await openai_serving_chat.remove_session(request.session_id)
+        return Response(content="good")
+      
     generator = await openai_serving_chat.create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
