@@ -1233,6 +1233,7 @@ class Scheduler:
         seqs = seq_group.get_seqs(status=SequenceStatus.RUNNING)
         seq_group.computed_block_seq = None
         seq_group.computed_block_nums = None
+        seq_group.session_reuse = -1
         assert len(seqs) == 1
         for seq in seqs:
             seq.status = SequenceStatus.WAITING

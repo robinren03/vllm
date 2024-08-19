@@ -302,6 +302,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         num_prompt_blocks = seq.n_blocks
         block_table: BlockTable = self.block_tables.get(computed_block_seq, [])
         
+        print(f"Session reuse:{session_reuse}, Sequence block:{seq.n_blocks}, Block table len:{len(block_table)}")
         if (session_reuse == -1): computed_len = len(block_table)
         else:
             computed_len = min(len(block_table), session_reuse // self.block_size)
@@ -315,7 +316,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         if (computed_len > seq.n_blocks):
             for i in range(seq.n_blocks, computed_len):
                 self.gpu_allocator.free(block_table[i])
-            computed_len = seq.block_size
+            computed_len = seq.n_blocks
+            block_table = block_table[:computed_len]
         
         for block in block_table:
             block.ref_count += ref_count - 1

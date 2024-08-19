@@ -169,11 +169,11 @@ class OpenAIServingChat(OpenAIServing):
                 add_special_tokens=request.add_special_tokens,
             )
 
-            self._log_inputs(request_id,
-                             prompt_inputs,
-                             params=sampling_params,
-                             lora_request=lora_request,
-                             prompt_adapter_request=prompt_adapter_request)
+            # self._log_inputs(request_id,
+            #                  prompt_inputs,
+            #                  params=sampling_params,
+            #                  lora_request=lora_request,
+            #                  prompt_adapter_request=prompt_adapter_request)
 
             engine_inputs: PromptInputs = {
                 "prompt_token_ids": prompt_inputs["prompt_token_ids"],
