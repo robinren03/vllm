@@ -40,6 +40,7 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
                         default=None,
                         help="host name")
     parser.add_argument("--port", type=int, default=8000, help="port number")
+    parser.add_argument("--global_name", type=str, default=None, help="global model name")
     parser.add_argument(
         "--uvicorn-log-level",
         type=str,

@@ -317,14 +317,16 @@ async def build_server(
         **uvicorn_kwargs,
     )
 
-    return uvicorn.Server(config)
+    return uvicorn.Server(config), served_model_names
 
+REGISTER_MACHINE_URL = "/register_machine"
+UNREGISTER_MACHINE_URL = "/unregister_machine"
 
 async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
     logger.info("vLLM API server version %s", VLLM_VERSION)
     logger.info("args: %s", args)
 
-    server = await build_server(
+    server, local_name = await build_server(
         args,
         llm_engine,
         **uvicorn_kwargs,
@@ -334,8 +336,34 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
 
     server_task = loop.create_task(server.serve())
 
+    import os, requests
+
+    if args.host is None:
+        model_url = "http://localhost"
+    else:
+        model_url = args.host  
+    model_url += f":{args.port}"
+    router_api = os.environ["SARS_ROUTER_API"]
+    while (True):
+        if args.global_name is None:
+            model_name = local_name[0]
+        else:
+            model_name = args.global_name
+
+        response = requests.post(router_api + REGISTER_MACHINE_URL, json={"source_url": model_url, "model": model_name, "local_name": local_name[0]})
+        if response.status_code != 200:
+            print(f"Failed to register machine {model_url}")
+        else:
+            print(f"Registered machine {model_url} for model {model_name}")
+            break
+
     def signal_handler() -> None:
         # prevents the uvicorn signal handler to exit early
+        response = requests.post(router_api + UNREGISTER_MACHINE_URL, json={"source_url": model_url, "model": model_name, "local_name": local_name[0]})
+        if response.status_code != 200:
+            print(f"Failed to unregister machine {model_url}")
+        else:
+            print(f"Unregistered machine {model_url} for model {model_name}")
         server_task.cancel()
 
     loop.add_signal_handler(signal.SIGINT, signal_handler)
