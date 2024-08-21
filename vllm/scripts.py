@@ -118,6 +118,7 @@ def main():
     serve_parser.add_argument("model_tag",
                               type=str,
                               help="The model tag to serve")
+    # serve_parser.add_argument("--global_name", type=str, default=None, help="global model name")
     serve_parser = make_arg_parser(serve_parser)
     serve_parser.set_defaults(dispatch_function=serve)
 
