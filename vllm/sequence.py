@@ -602,6 +602,9 @@ class SequenceGroup:
         if (self.metrics.first_token_time is None
                 and self.get_seqs()[0].get_output_len() == 1):
             self.metrics.first_token_time = time
+            # print("TTFT Time: ", time - self.metrics.arrival_time)
+            # if time - self.metrics.arrival_time < 0.1:
+            #     print("First token time is too close to arrival time")
 
     def maybe_set_first_scheduled_time(self, time: float) -> None:
         """Sets the first scheduled time and time in queue for Request

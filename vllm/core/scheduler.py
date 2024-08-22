@@ -899,7 +899,7 @@ class Scheduler:
         )
 
         if sched_output.is_lazy():
-            print("Lazy detection")
+            # print("Lazy detection")
             assert session_id_block
             session_id, seq_id = list(session_id_block.items())[0] #TODO(yanyu): Use a better strategy
             self.free_seq_id(seq_id)
@@ -1059,6 +1059,8 @@ class Scheduler:
                 common_computed_block_nums = (
                     self.block_manager.get_common_computed_block_ids(
                         seq_group.get_seqs(status=SequenceStatus.RUNNING)))
+                # print("Prefix len", len(common_computed_block_nums))
+                # print("Semi-ready time", time.time() - seq_group.metrics.arrival_time)
             else:
                 common_computed_block_nums = seq_group.computed_block_nums
             

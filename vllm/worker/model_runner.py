@@ -360,8 +360,9 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         computed_block_nums = inter_data.computed_block_nums
 
         # Note that prefix caching does not support sliding window.
-        # if (computed_block_nums is not None): print(f"Pre-Hit Cache of {len(computed_block_nums)}")
-        # else: print(f"Pre-Hit Cache of 0")
+        if (inter_data.is_prompt):
+            if (computed_block_nums is not None): print(f"Pre-Hit Cache of {len(computed_block_nums)}")
+            else: print(f"Pre-Hit Cache of 0")
         prefix_cache_hit = (computed_block_nums is not None
                             and len(computed_block_nums) > 0
                             and self.sliding_window is None

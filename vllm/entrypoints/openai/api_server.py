@@ -343,8 +343,8 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
     else:
         model_url = args.host  
     model_url += f":{args.port}"
-    router_api = os.environ["SARS_ROUTER_API"]
-    while (True):
+    router_api = os.environ.get("SARS_ROUTER_API", None)
+    while (router_api is not None):
         if args.global_name is None:
             model_name = local_name[0]
         else:
@@ -359,11 +359,12 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
 
     def signal_handler() -> None:
         # prevents the uvicorn signal handler to exit early
-        response = requests.post(router_api + UNREGISTER_MACHINE_URL, json={"source_url": model_url, "model": model_name, "local_name": local_name[0]})
-        if response.status_code != 200:
-            print(f"Failed to unregister machine {model_url}")
-        else:
-            print(f"Unregistered machine {model_url} for model {model_name}")
+        if (router_api is not None):
+            response = requests.post(router_api + UNREGISTER_MACHINE_URL, json={"source_url": model_url, "model": model_name, "local_name": local_name[0]})
+            if response.status_code != 200:
+                print(f"Failed to unregister machine {model_url}")
+            else:
+                print(f"Unregistered machine {model_url} for model {model_name}")
         server_task.cancel()
 
     loop.add_signal_handler(signal.SIGINT, signal_handler)

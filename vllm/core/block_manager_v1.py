@@ -297,21 +297,21 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                            computed_block_seq: int, \
                            session_reuse: int, \
                            ref_count: int, \
-                           is_encoder_decoder: bool = True) -> BlockTable:
+                           is_encoder_decoder: bool = True) -> Tuple[BlockTable, int]:
         # Allocate new physical token blocks that will store the prompt tokens.
         num_prompt_blocks = seq.n_blocks
         block_table: BlockTable = self.block_tables.get(computed_block_seq, [])
         
-        print(f"Session reuse:{session_reuse}, Sequence block:{seq.n_blocks}, Block table len:{len(block_table)}")
-        if (session_reuse == -1): computed_len = len(block_table)
-        else:
-            computed_len = min(len(block_table), session_reuse // self.block_size)
-            for i in range(computed_len, len(block_table)):
-                self.gpu_allocator.free(block_table[i])
-            block_table = block_table[:computed_len]
-            
-        if (computed_len > 0):
+        if (len(block_table) > 0):
             del self.block_tables[computed_block_seq]
+
+        # print(f"Session reuse:{session_reuse}, Sequence block:{seq.n_blocks}, Block table len:{len(block_table)}")
+        if (session_reuse == -1): session_reuse = 0
+        
+        computed_len = min(len(block_table), session_reuse // self.block_size)
+        for i in range(computed_len, len(block_table)):
+            self.gpu_allocator.free(block_table[i])
+        block_table = block_table[:computed_len]
         
         if (computed_len > seq.n_blocks):
             for i in range(seq.n_blocks, computed_len):
@@ -360,9 +360,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                                     seq_group.session_reuse,
                                     seq_group.num_seqs(),
                                     is_encoder_decoder)
-
-        seq_group.computed_block_seq = None
-        seq_group.session_reuse = -1
+        
         block_table: BlockTable = result[0]
         computed_len: int = result[1]
         

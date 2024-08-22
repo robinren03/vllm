@@ -179,8 +179,10 @@ class OpenAIServingChat(OpenAIServing):
                 "prompt_token_ids": prompt_inputs["prompt_token_ids"],
             }
             
-            if "Meta-Llama-3-8B-Instruct" in request.model:
+            if "Llama-3" in request.model:
                 session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse)
+                print("Session Reuse: ", session_reuse)
+
 
             if mm_data is not None:
                 engine_inputs["multi_modal_data"] = mm_data
