@@ -315,6 +315,7 @@ class LLMEngine:
         ]
 
         self.session_id_blocks = [{} for _ in range(parallel_config.pipeline_parallel_size)]
+        self.session_id_arrived = [{} for _ in range(parallel_config.pipeline_parallel_size)]
 
         # Metric Logging.
         if self.log_stats:
@@ -379,10 +380,14 @@ class LLMEngine:
 
     def free_session(self, session_id: str) -> None:
         """Free the session's resources."""
-        for scheduler, session_block_id in zip(self.scheduler, self.session_id_blocks):
+        for scheduler, session_block_id, session_id_arrived in zip(self.scheduler, self.session_id_blocks, self.session_id_arrived):
             if session_id in session_block_id:
                 scheduler.free_seq_id(session_block_id[session_id])
                 del session_block_id[session_id]
+            
+            if session_id in session_id_arrived:
+                scheduler.free_seq_id(session_id_arrived[session_id])
+                del session_id_arrived[session_id]
 
     @classmethod
     def _get_executor_cls(cls,
@@ -579,9 +584,14 @@ class LLMEngine:
 
         if session_id is not None:
             for idx, session_id_block in enumerate(self.session_id_blocks):
-                if session_id in session_id_block and costs[idx]<=min_cost*2+1:
-                    preferred_scheduler = idx
-                    seq_group.computed_block_seq = session_id_block[session_id]
+                if session_id in session_id_block:
+                    if costs[idx]<=min_cost*2+1:
+                        preferred_scheduler = idx
+                        seq_group.computed_block_seq = session_id_block.pop(session_id)
+                        self.session_id_arrived[preferred_scheduler] = {session_id:seq_group.computed_block_seq, **self.session_id_arrived[preferred_scheduler]}
+                    else:
+                        self.scheduler[idx].free_seq_id(session_id_block[session_id])
+                        del session_id_block[session_id]
                     break
         
         min_cost_scheduler = self.scheduler[preferred_scheduler]
@@ -933,7 +943,7 @@ class LLMEngine:
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
-            0].schedule(self.session_id_blocks[0])
+            0].schedule(self.session_id_blocks[0], self.session_id_arrived[0])
 
         if not scheduler_outputs.is_empty():
             finished_requests_ids = self.scheduler[

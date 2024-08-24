@@ -244,7 +244,7 @@ class _AsyncLLMEngine(LLMEngine):
         the sequences and returns the newly generated results.
         """
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
-            virtual_engine].schedule(self.session_id_blocks[virtual_engine])
+            virtual_engine].schedule(self.session_id_blocks[virtual_engine], self.session_id_arrived[virtual_engine])
 
         if not scheduler_outputs.is_empty():
             # Execute the model.

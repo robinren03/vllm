@@ -147,10 +147,6 @@ class SchedulerOutputs:
         return (not self.scheduled_seq_groups and not self.blocks_to_swap_in
                 and not self.blocks_to_swap_out and not self.blocks_to_copy)
     
-    def is_lazy(self) -> bool:
-        # NOTE: The output is lazy if no sequence groups are scheduled, but with pending ones.
-        return self.is_empty() and self.ignored_seq_groups
-    
     def _sort_by_lora_ids(self):
         self.scheduled_seq_groups = sorted(
             self.scheduled_seq_groups,
@@ -413,7 +409,8 @@ class Scheduler:
         policy: Policy,
         enable_chunking: bool = False,
         finished_queue: deque = None,
-        session_id_block: Dict[str, int] = None
+        session_id_block: Dict[str, int] = None,
+        session_id_arrived: Dict[str, int] = None
     ) -> Tuple[deque, SchedulerRunningOutputs]:
         """Schedule sequence groups that are running.
 
@@ -482,6 +479,9 @@ class Scheduler:
                         self.free_finished_seq(victim_seq_group, required_slot)
                 elif session_id_block is not None and len(session_id_block) > 0:
                     seq_id = session_id_block.pop()
+                    self.free_seq_id(seq_id)
+                elif session_id_arrived is not None and len(session_id_arrived) > 0:
+                    seq_id = session_id_arrived.pop()
                     self.free_seq_id(seq_id)
                 elif running_queue:
                     # Preempt the lowest-priority sequence groups.
@@ -795,7 +795,7 @@ class Scheduler:
             ignored_seq_groups=ignored_seq_groups,
             num_lookahead_slots=self._get_num_lookahead_slots(is_prefill=True))
 
-    def _schedule_default(self, session_id_block:Dict[str, int]) -> SchedulerOutputs:
+    def _schedule_default(self, session_id_block:Dict[str, int], session_id_arrived: Dict[str, int]) -> SchedulerOutputs:
         """Schedule queued requests.
         
         The current policy is designed to optimize the throughput. First,
@@ -831,8 +831,8 @@ class Scheduler:
             for seq_group in prefills.seq_groups:
                 if type(seq_group) == ScheduledSequenceGroup:
                     seq_group = seq_group.seq_group
-                if seq_group.session_id is not None and seq_group.session_id in session_id_block:
-                    del session_id_block[seq_group.session_id]
+                if seq_group.session_id is not None and seq_group.session_id in session_id_arrived:
+                    del session_id_arrived[seq_group.session_id]
 
         fcfs_policy = PolicyFactory.get_policy(policy_name="fcfs")
         # Don't schedule decodes if prefills are scheduled.
@@ -846,7 +846,8 @@ class Scheduler:
                 fcfs_policy,
                 enable_chunking=False,
                 finished_queue=self._finished_queue,
-                session_id_block=session_id_block)
+                session_id_block=session_id_block,
+                session_id_arrived=session_id_arrived)
 
             # If any sequence group is preempted, do not swap in any sequence
             # group. because it means there's no slot for new running requests.
@@ -898,13 +899,18 @@ class Scheduler:
             preempted=preempted,
         )
 
-        if sched_output.is_lazy():
+        if sched_output.is_empty() and len(self.waiting) > 0:
             # print("Lazy detection")
-            assert session_id_block
-            session_id, seq_id = list(session_id_block.items())[0] #TODO(yanyu): Use a better strategy
-            self.free_seq_id(seq_id)
-            del session_id_block[session_id]
-            return self._schedule_default(session_id_block)
+            assert session_id_block or session_id_arrived
+            if session_id_block:
+                session_id, seq_id = list(session_id_block.items())[0] 
+                self.free_seq_id(seq_id)
+                del session_id_block[session_id]
+            else:
+                session_id, seq_id = list(session_id_arrived.items())[0]
+                self.free_seq_id(seq_id)
+                del session_id_arrived[session_id]
+            return self._schedule_default(session_id_block, session_id_arrived)
         else:
             return sched_output
         
@@ -1000,12 +1006,12 @@ class Scheduler:
                        len(running_scheduled.swapped_out)),
         )
 
-    def _schedule(self, session_id_block) -> SchedulerOutputs:
+    def _schedule(self, session_id_block, session_id_arrived) -> SchedulerOutputs:
         """Schedule queued requests."""
         if self.scheduler_config.chunked_prefill_enabled:
             return self._schedule_chunked_prefill()
         else:
-            return self._schedule_default(session_id_block)
+            return self._schedule_default(session_id_block, session_id_arrived)
 
     def _can_append_slots(self, seq_group: SequenceGroup) -> bool:
         """Determine whether or not we have enough space in the KV cache to
