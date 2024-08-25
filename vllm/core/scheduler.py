@@ -1035,11 +1035,11 @@ class Scheduler:
     def _required_slots(self, seq_group: SequenceGroup) -> int:
         return self.block_manager.get_append_required_blocks(seq_group)
     
-    def schedule(self, session_id_blocks) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
+    def schedule(self, session_id_blocks, session_id_arrived) -> Tuple[List[SequenceGroupMetadata], SchedulerOutputs]:
         # Schedule sequence groups.
         # This function call changes the internal states of the scheduler
         # such as self.running, self.swapped, and self.waiting.
-        scheduler_outputs = self._schedule(session_id_blocks)
+        scheduler_outputs = self._schedule(session_id_blocks, session_id_arrived)
         now = time.time()
 
         # Create input data structures.

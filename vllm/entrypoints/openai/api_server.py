@@ -51,6 +51,8 @@ openai_serving_completion: OpenAIServingCompletion
 openai_serving_embedding: OpenAIServingEmbedding
 openai_serving_tokenization: OpenAIServingTokenization
 
+active_exit = False
+
 logger = init_logger('vllm.entrypoints.openai.api_server')
 
 _running_tasks: Set[asyncio.Task] = set()
@@ -92,6 +94,7 @@ async def health() -> Response:
 @router.get("/exit")  
 async def exit() -> Response:  
     """Exit the engine after responding to the request."""  
+    active_exit = True
     asyncio.create_task(schedule_exit())  
     return Response(content="Shutting down...", status_code=200)  
 
@@ -341,7 +344,8 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
     if args.host is None:
         model_url = "http://localhost"
     else:
-        model_url = args.host  
+        model_url = args.host
+
     model_url += f":{args.port}"
     router_api = os.environ.get("SARS_ROUTER_API", None)
     while (router_api is not None):
@@ -349,8 +353,15 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
             model_name = local_name[0]
         else:
             model_name = args.global_name
+        
+        num_gpu = args.tensor_parallel_size * args.pipeline_parallel_size
 
-        response = requests.post(router_api + REGISTER_MACHINE_URL, json={"source_url": model_url, "model": model_name, "local_name": local_name[0]})
+        response = requests.post(router_api + REGISTER_MACHINE_URL, json={
+            "source_url": model_url, 
+            "model": model_name, 
+            "local_name": local_name[0], 
+            "gpu_cost": num_gpu})
+        
         if response.status_code != 200:
             print(f"Failed to register machine {model_url}")
         else:
@@ -359,8 +370,12 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
 
     def signal_handler() -> None:
         # prevents the uvicorn signal handler to exit early
-        if (router_api is not None):
-            response = requests.post(router_api + UNREGISTER_MACHINE_URL, json={"source_url": model_url, "model": model_name, "local_name": local_name[0]})
+        if (router_api is not None and not active_exit):
+            response = requests.post(router_api + UNREGISTER_MACHINE_URL, json={
+                "source_url": model_url, 
+                "model": model_name, 
+                "local_name": local_name[0], 
+                "gpu_cost": num_gpu})
             if response.status_code != 200:
                 print(f"Failed to unregister machine {model_url}")
             else:
