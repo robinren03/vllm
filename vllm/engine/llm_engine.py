@@ -259,6 +259,9 @@ class LLMEngine:
             load_config=load_config,
             prompt_adapter_config=prompt_adapter_config,
         )
+        
+        self.metrics_1 = []
+        self.metrics_2 = []
 
         if not self.model_config.embedding_mode:
             self._initialize_kv_caches()
@@ -1086,6 +1089,10 @@ class LLMEngine:
                     if not seq_group.is_prefill():
                         latency = seq_group.get_last_latency(now)
                         time_to_first_tokens_iter.append(latency)
+                        if seq_group.session_id is None:
+                            self.metrics_1.append(latency)
+                        else:
+                            self.metrics_2.append(latency)
 
                         # One generation token per finished prefill.
                         num_generation_tokens_from_prefill_groups += (
@@ -1214,7 +1221,6 @@ class LLMEngine:
         arrival_time_nano_seconds = int(seq_group.metrics.arrival_time * 1e9)
 
         trace_context = extract_trace_context(seq_group.trace_headers)
-
         with self.tracer.start_as_current_span(
                 "llm_request",
                 kind=SpanKind.SERVER,

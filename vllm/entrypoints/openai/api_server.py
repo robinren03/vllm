@@ -6,6 +6,7 @@ import signal
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 from typing import Optional, Set
+import json
 
 import fastapi
 import uvicorn
@@ -94,6 +95,7 @@ async def health() -> Response:
 @router.get("/exit")  
 async def exit() -> Response:  
     """Exit the engine after responding to the request."""  
+    global active_exit
     active_exit = True
     asyncio.create_task(schedule_exit())  
     return Response(content="Shutting down...", status_code=200)  
@@ -380,6 +382,14 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
                 print(f"Failed to unregister machine {model_url}")
             else:
                 print(f"Unregistered machine {model_url} for model {model_name}")
+        
+        with open("metrics.txt", "w") as f:
+            metrics = {
+                "metrics_1": engine.engine.metrics_1,
+                "metrics_2": engine.engine.metrics_2
+            }
+            json.dump(metrics, f)
+            
         server_task.cancel()
 
     loop.add_signal_handler(signal.SIGINT, signal_handler)
