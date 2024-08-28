@@ -203,7 +203,9 @@ class OpenAIServingChat(OpenAIServing):
                 trace_headers=trace_headers,
                 prompt_adapter_request=prompt_adapter_request,
                 session_id=session_id,
-                session_reuse = session_reuse
+                session_reuse = session_reuse,
+                rounds=request.rounds,
+                default_config=request.default_config
             )
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error

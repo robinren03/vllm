@@ -92,6 +92,11 @@ async def health() -> Response:
     await openai_serving_chat.engine.check_health()
     return Response(status_code=200)
 
+@router.get("/future")
+async def get_memory_future() -> Response:
+    """Get future."""
+    return Response(content=engine.engine.gpu_cache_guess, status_code=200)
+
 @router.get("/exit")  
 async def exit() -> Response:  
     """Exit the engine after responding to the request."""  
@@ -362,7 +367,8 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
             "source_url": model_url, 
             "model": model_name, 
             "local_name": local_name[0], 
-            "gpu_cost": num_gpu})
+            "gpu_cost": num_gpu,
+            "total_gpu_blocks": engine.engine.cache_config.num_gpu_blocks})
         
         if response.status_code != 200:
             print(f"Failed to register machine {model_url}")
@@ -377,7 +383,8 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
                 "source_url": model_url, 
                 "model": model_name, 
                 "local_name": local_name[0], 
-                "gpu_cost": num_gpu})
+                "gpu_cost": num_gpu,
+                "total_gpu_blocks": engine.engine.cache_config.num_gpu_blocks})
             if response.status_code != 200:
                 print(f"Failed to unregister machine {model_url}")
             else:

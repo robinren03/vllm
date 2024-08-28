@@ -7,6 +7,7 @@ from typing import Set, Type, TypeVar, Union
 
 from transformers import PreTrainedTokenizer
 
+from vllm.entrypoints.openai.protocol import AgentConfig
 import vllm.envs as envs
 from vllm.config import (CacheConfig, DecodingConfig, DeviceConfig,
                          EngineConfig, LoadConfig, LoRAConfig, ModelConfig,
@@ -30,6 +31,7 @@ from vllm.lora.request import LoRARequest
 from vllm.outputs import (EmbeddingRequestOutput, RequestOutput,
                           RequestOutputFactory)
 from vllm.pooling_params import PoolingParams
+from vllm.preserve.session_config import SessionConfig
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import (EmbeddingSequenceGroupOutput, ExecuteModelRequest,
@@ -46,6 +48,7 @@ from vllm.usage.usage_lib import (UsageContext, is_usage_stats_enabled,
                                   usage_message)
 from vllm.utils import Counter
 from vllm.version import __version__ as VLLM_VERSION
+from vllm.preserve.preserve import sum_sps
 
 logger = init_logger(__name__)
 _LOCAL_LOGGING_INTERVAL_SEC = 5
@@ -172,6 +175,7 @@ class LLMEngine:
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
+        time_lr: Optional[float] = 0.7
     ) -> None:
         logger.info(
             "Initializing an LLM engine (v%s) with config: "
@@ -262,6 +266,11 @@ class LLMEngine:
         
         self.metrics_1 = []
         self.metrics_2 = []
+        
+        self.session_configs: Dict[str, SessionConfig] = {}
+        self.gpu_cache_guess: List[(float, float)] = []
+
+        self.time_lr = time_lr
 
         if not self.model_config.embedding_mode:
             self._initialize_kv_caches()
@@ -391,6 +400,8 @@ class LLMEngine:
             if session_id in session_id_arrived:
                 scheduler.free_seq_id(session_id_arrived[session_id])
                 del session_id_arrived[session_id]
+        if session_id in self.session_configs:
+            del self.session_configs[session_id]
 
     @classmethod
     def _get_executor_cls(cls,
@@ -541,12 +552,22 @@ class LLMEngine:
         prompt_adapter_request: Optional[PromptAdapterRequest],
         trace_headers: Optional[Mapping[str, str]] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1
+        session_reuse: Optional[int] = -1,
+        rounds: Optional[float] = -1,
+        default_config: Optional[AgentConfig] = None
     ) -> None:
         # Create the sequences.
         block_size = self.cache_config.block_size
         seq_id = next(self.seq_counter)
         eos_token_id = self._get_eos_token_id(lora_request)
+
+        if session_id:
+            if session_id in self.session_configs:
+                self.session_configs[session_id].update(len(processed_inputs.prompt_token_ids), arrival_time, session_reuse, rounds)
+            else:
+                assert default_config is not None, "default_config must be provided for new session"
+                self.session_configs[session_id] = SessionConfig(default_config.ip, default_config.p, 
+                                                                 len(processed_inputs.prompt_token_ids), default_config.tau, arrival_time, rounds)
 
         seq = Sequence(seq_id, processed_inputs, block_size, eos_token_id,
                        lora_request, prompt_adapter_request)
@@ -644,7 +665,9 @@ class LLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1
+        session_reuse: Optional[int] = -1,
+        rounds: Optional[float] = -1,
+        default_config: Optional[AgentConfig] = None
     ) -> None:
         """Add a request to the engine's request pool.
 
@@ -709,7 +732,9 @@ class LLMEngine:
             prompt_adapter_request=prompt_adapter_request,
             trace_headers=trace_headers,
             session_id=session_id,
-            session_reuse=session_reuse
+            session_reuse=session_reuse,
+            rounds=rounds,
+            default_config=default_config
         )
 
     def _create_sequence_group_with_sampling(
@@ -1029,13 +1054,19 @@ class LLMEngine:
 
         # KV Cache Usage in %
         num_total_gpu = self.cache_config.num_gpu_blocks
-        gpu_cache_usage_sys = 0.
+        real_gpu_cache_usage_sys = 0.
         if num_total_gpu is not None:
             num_free_gpu = sum(
                 scheduler.block_manager.get_num_free_gpu_blocks()
                 for scheduler in self.scheduler)
-            gpu_cache_usage_sys = 1.0 - (num_free_gpu / num_total_gpu)
-
+            real_gpu_cache_usage_sys = 1.0 - (num_free_gpu / num_total_gpu)
+        
+        current_time = round(time.time(), 2)
+        gpu_cache_guess = sum_sps(self.session_configs.values(), self.model_config.max_model_len, current_time, num_total_gpu)
+        delta = real_gpu_cache_usage_sys - gpu_cache_guess[0][1]
+        import math
+        self.gpu_cache_guess = [(time, usage + delta * math.exp((current_time - time) * self.time_lr)) for time, usage in gpu_cache_guess]
+        
         num_total_cpu = self.cache_config.num_cpu_blocks
         cpu_cache_usage_sys = 0.
         if num_total_cpu is not None and num_total_cpu > 0:
@@ -1154,7 +1185,7 @@ class LLMEngine:
             num_swapped_sys=num_swapped_sys,
             num_waiting_sys=num_waiting_sys,
             #   KV Cache Usage in %
-            gpu_cache_usage_sys=gpu_cache_usage_sys,
+            gpu_cache_usage_sys=real_gpu_cache_usage_sys,
             cpu_cache_usage_sys=cpu_cache_usage_sys,
 
             # Iteration stats

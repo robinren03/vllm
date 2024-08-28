@@ -6,6 +6,7 @@ from typing import (AsyncIterator, Callable, Dict, Iterable, List, Mapping,
 
 from transformers import PreTrainedTokenizer
 
+from vllm.entrypoints.openai.protocol import AgentConfig
 import vllm.envs as envs
 from vllm.config import DecodingConfig, EngineConfig, ModelConfig
 from vllm.core.scheduler import SchedulerOutputs
@@ -20,6 +21,7 @@ from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.outputs import EmbeddingRequestOutput, RequestOutput
 from vllm.pooling_params import PoolingParams
+from vllm.preserve.session_config import SessionConfig
 from vllm.prompt_adapter.request import PromptAdapterRequest
 from vllm.sampling_params import SamplingParams
 from vllm.sequence import ExecuteModelRequest, SamplerOutput
@@ -686,7 +688,9 @@ class AsyncLLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1
+        session_reuse: Optional[int] = -1,
+        rounds: Optional[float] = -1,
+        default_config: Optional[AgentConfig] = None
     ) -> AsyncStream:
         if not self.is_running:
             if self.start_engine_loop:
@@ -711,7 +715,9 @@ class AsyncLLMEngine:
             trace_headers=trace_headers,
             prompt_adapter_request=prompt_adapter_request,
             session_id = session_id,
-            session_reuse = session_reuse)
+            session_reuse = session_reuse,
+            rounds=rounds,
+            default_config=default_config)
 
         return stream
 
@@ -724,7 +730,9 @@ class AsyncLLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1
+        session_reuse: Optional[int] = -1,
+        rounds: Optional[float] = -1,
+        default_config: Optional[AgentConfig] = None
     ) -> AsyncIterator[RequestOutput]:
         """Generate outputs for a request.
 
@@ -798,7 +806,9 @@ class AsyncLLMEngine:
                 trace_headers=trace_headers,
                 prompt_adapter_request=prompt_adapter_request,
                 session_id=session_id,
-                session_reuse=session_reuse
+                session_reuse=session_reuse,
+                rounds = rounds,
+                default_config = default_config
         ):
             yield LLMEngine.validate_output(output, RequestOutput)
 
@@ -895,7 +905,9 @@ class AsyncLLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1
+        session_reuse: Optional[int] = -1,
+        rounds: Optional[float] = -1,
+        default_config: Optional[AgentConfig] = None
     ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Common logic to process requests with SamplingParams or
         PoolingParams."""
@@ -910,7 +922,9 @@ class AsyncLLMEngine:
             trace_headers=trace_headers,
             prompt_adapter_request=prompt_adapter_request,
             session_id = session_id,
-            session_reuse = session_reuse
+            session_reuse = session_reuse,
+            rounds=rounds,
+            default_config=default_config
         )
 
         try:

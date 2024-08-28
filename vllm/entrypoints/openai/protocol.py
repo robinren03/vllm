@@ -17,6 +17,10 @@ class OpenAIBaseModel(BaseModel):
     # OpenAI API does not allow extra fields
     model_config = ConfigDict(extra="forbid")
 
+class AgentConfig(OpenAIBaseModel):
+    ip : float
+    p: float
+    tau: float
 
 class ErrorResponse(OpenAIBaseModel):
     object: str = "error"
@@ -121,6 +125,10 @@ class ChatCompletionRequest(OpenAIBaseModel):
 
     session_id: Optional[str] = None
     session_reuse: Optional[int] = -1
+
+    default_config: Optional[AgentConfig] = AgentConfig(ip=-1, p=100, tau=2)
+    rounds: Optional[float] = -1
+
     request_stop: Optional[bool] = False
     
     # doc: begin-chat-completion-sampling-params
