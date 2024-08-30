@@ -29,17 +29,17 @@ def sum_sps(configs:List[SessionConfig], model_max_len: int, current_time:float,
         time_points.update(sp_breaking_point(config, model_max_len))
     
     time_val = []
-    prev_pair = (0, -1)
-    ahead_pair = (-1, -1)
+    prev_pair = (0, 0)
+    ahead_pair = (-1, -1000)
     for tp in time_points:
         if tp < current_time - 0.01:
             continue
 
-        new_pair = (tp, round(sum([sp_at_time(config, model_max_len, tp) for config in configs]) / num_gpu_blocks, 3))
-        if abs(prev_pair[1] - ahead_pair[1]) + abs(ahead_pair[1] - new_pair[1]) < 0.02: 
-            # TODO (yanyu): 0.02 is a magic number, may be use a wiser number
+        new_pair = (tp, round(sum([sp_at_time(config, model_max_len, tp) for config in configs]), 3))
+        if abs(prev_pair[1] - ahead_pair[1]) + abs(ahead_pair[1] - new_pair[1]) < 128: 
+            # TODO (yanyu): 128 = block_size * 8, and 8 is a magic number
             time_val[-1] = new_pair
-            prev_pair = new_pair
+            prev_pair = new_pair 
         else:
             ahead_pair = prev_pair
             prev_pair = new_pair

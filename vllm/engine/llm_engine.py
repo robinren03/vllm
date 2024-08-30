@@ -563,11 +563,11 @@ class LLMEngine:
 
         if session_id:
             if session_id in self.session_configs:
-                self.session_configs[session_id].update(len(processed_inputs.prompt_token_ids), arrival_time, session_reuse, rounds)
+                self.session_configs[session_id].update(len(processed_inputs["prompt_token_ids"]), arrival_time, session_reuse, rounds)
             else:
                 assert default_config is not None, "default_config must be provided for new session"
                 self.session_configs[session_id] = SessionConfig(default_config.ip, default_config.p, 
-                                                                 len(processed_inputs.prompt_token_ids), default_config.tau, arrival_time, rounds)
+                                                                 len(processed_inputs["prompt_token_ids"]), default_config.tau, arrival_time, rounds)
 
         seq = Sequence(seq_id, processed_inputs, block_size, eos_token_id,
                        lora_request, prompt_adapter_request)

@@ -95,7 +95,7 @@ async def health() -> Response:
 @router.get("/future")
 async def get_memory_future() -> Response:
     """Get future."""
-    return Response(content=engine.engine.gpu_cache_guess, status_code=200)
+    return JSONResponse(content={"gpu_guess":engine.engine.gpu_cache_guess}, status_code=200)
 
 @router.get("/exit")  
 async def exit() -> Response:  

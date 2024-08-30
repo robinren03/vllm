@@ -325,7 +325,9 @@ class _AsyncLLMEngine(LLMEngine):
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str]=None,
-        session_reuse: Optional[int]=-1
+        session_reuse: Optional[int]=-1,
+        rounds: Optional[float] = -1,
+        default_config: Optional[AgentConfig] = None
     ) -> None:
         if lora_request is not None and not self.lora_config:
             raise ValueError(f"Got lora_request {lora_request} but LoRA is "
@@ -348,7 +350,9 @@ class _AsyncLLMEngine(LLMEngine):
             prompt_adapter_request=prompt_adapter_request,
             trace_headers=trace_headers,
             session_id=session_id,
-            session_reuse=session_reuse
+            session_reuse=session_reuse,
+            rounds=rounds,
+            default_config=default_config
         )
 
     async def check_health_async(self) -> None:
