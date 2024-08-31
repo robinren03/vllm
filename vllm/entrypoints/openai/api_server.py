@@ -316,7 +316,7 @@ async def build_server(
 
     config = uvicorn.Config(
         app,
-        host=args.host,
+        host=None,
         port=args.port,
         log_level=args.uvicorn_log_level,
         timeout_keep_alive=TIMEOUT_KEEP_ALIVE,
