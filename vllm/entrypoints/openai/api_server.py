@@ -110,6 +110,8 @@ async def schedule_exit(delay: float = 0.5) -> None:
     import os, signal
     await asyncio.sleep(delay)  # 等待足够的时间来发送HTTP响应  
     os.kill(os.getpid(), signal.SIGINT)  
+    await asyncio.sleep(delay * 10)
+    os.kill(os.getpid(), signal.SIGKILL)
 
 
 @router.post("/tokenize")
