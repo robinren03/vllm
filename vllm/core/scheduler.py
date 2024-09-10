@@ -824,7 +824,7 @@ class Scheduler:
             self.swapped, SchedulerSwappedInOutputs.create_empty())
 
         # If any requests are swapped, prioritized swapped requests.
-        if not self.swapped:
+        if not self.swapped and len(remaining_running) < 15:
             remaining_waiting, prefills = self._schedule_prefills(
                 self.waiting, budget, curr_loras, enable_chunking=False)
             for seq_group in prefills.seq_groups:
@@ -881,6 +881,10 @@ class Scheduler:
         # doesn't allow chunked prefills.
         assert len(running_scheduled.prefill_seq_groups) == 0
         assert len(swapped_in.prefill_seq_groups) == 0
+
+        print("Prefill sequence groups:", [seq_group.seq_group.request_id for seq_group in prefills.seq_groups])
+        print("Decoding sequence groups:", [seq_group.seq_group.request_id for seq_group in running_scheduled.decode_seq_groups])
+
         sched_output = SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
                                   running_scheduled.decode_seq_groups +
@@ -898,6 +902,7 @@ class Scheduler:
             preempted=preempted,
         )
 
+        print("Is empty? is waiting?", sched_output.is_empty(), len(self.waiting))
         if sched_output.is_empty() and len(self.waiting) > 0:
             # print("Lazy detection")
             assert session_id_block or session_id_arrived
