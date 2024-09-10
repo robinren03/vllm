@@ -362,6 +362,8 @@ class Scheduler:
         if isinstance(request_id, str):
             request_id = (request_id, )
         request_ids = set(request_id)
+        print("Aborted in the abort_seq_group:", request_ids)
+
         for state_queue in [self.waiting, self.running, self.swapped]:
             aborted_groups: List[SequenceGroup] = []
             for seq_group in state_queue:
@@ -376,6 +378,7 @@ class Scheduler:
             for aborted_group in aborted_groups:
                 # Remove the sequence group from the state queue.
                 state_queue.remove(aborted_group)
+                print("Successfully removed:", aborted_group.request_id)
                 self._finished_requests_ids.append(aborted_group.request_id)
                 for seq in aborted_group.get_seqs():
                     if seq.is_finished():
@@ -471,12 +474,8 @@ class Scheduler:
                 if finished_queue is not None and len(finished_queue) > 0:
                     required_slot = self._required_slots(seq_group)
                     victim_seq: Sequence = finished_queue[0]
-                    if (victim_seq.n_blocks() <= required_slot):
-                        self.free_seq(victim_seq)
-                        victim_seq.finished_removed += victim_seq.n_blocks()
-                        finished_queue.popleft()
-                    else:
-                        self.free_finished_seq(victim_seq_group, required_slot)
+                    self.free_seq(victim_seq)
+                    finished_queue.popleft()
                 elif session_id_block is not None and len(session_id_block) > 0:
                     seq_id = session_id_block.pop()
                     self.free_seq_id(seq_id)
@@ -1127,6 +1126,7 @@ class Scheduler:
 
     def free_seq(self, seq: Sequence) -> None:
         """Free a sequence from a block table."""
+        seq.finished_removed = seq.n_blocks
         self.block_manager.free(seq)
 
     def free_seq_id(self, seq_id: int) -> None:

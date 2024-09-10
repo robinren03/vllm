@@ -182,7 +182,7 @@ class RequestTracker:
         if verbose:
             logger.info("Aborted request %s.", request_id)
 
-        if (is_exception): self._finished_requests.put_nowait(request_id)
+        if (is_exception or verbose): self._finished_requests.put_nowait(request_id)
         else: self._finished_requests_preserve.put_nowait(request_id)
 
         if request_id not in self._request_streams or self._request_streams[
