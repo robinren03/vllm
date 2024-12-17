@@ -362,7 +362,7 @@ class Scheduler:
         if isinstance(request_id, str):
             request_id = (request_id, )
         request_ids = set(request_id)
-        print("Aborted in the abort_seq_group:", request_ids)
+        # print("Aborted in the abort_seq_group:", request_ids)
 
         for state_queue in [self.waiting, self.running, self.swapped]:
             aborted_groups: List[SequenceGroup] = []
@@ -378,7 +378,7 @@ class Scheduler:
             for aborted_group in aborted_groups:
                 # Remove the sequence group from the state queue.
                 state_queue.remove(aborted_group)
-                print("Successfully removed:", aborted_group.request_id)
+                # print("Successfully removed:", aborted_group.request_id)
                 self._finished_requests_ids.append(aborted_group.request_id)
                 for seq in aborted_group.get_seqs():
                     if seq.is_finished():
@@ -882,8 +882,8 @@ class Scheduler:
         assert len(running_scheduled.prefill_seq_groups) == 0
         assert len(swapped_in.prefill_seq_groups) == 0
 
-        print("Prefill sequence groups:", [seq_group.seq_group.request_id for seq_group in prefills.seq_groups])
-        print("Decoding sequence groups:", [seq_group.seq_group.request_id for seq_group in running_scheduled.decode_seq_groups])
+        # print("Prefill sequence groups:", [seq_group.seq_group.request_id for seq_group in prefills.seq_groups])
+        # print("Decoding sequence groups:", [seq_group.seq_group.request_id for seq_group in running_scheduled.decode_seq_groups])
 
         sched_output = SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
@@ -902,7 +902,7 @@ class Scheduler:
             preempted=preempted,
         )
 
-        print("Is empty? is waiting?", sched_output.is_empty(), len(self.waiting))
+        # print("Is empty? is waiting?", sched_output.is_empty(), len(self.waiting))
         if sched_output.is_empty() and len(self.waiting) > 0:
             # print("Lazy detection")
             assert session_id_block or session_id_arrived

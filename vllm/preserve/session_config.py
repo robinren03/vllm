@@ -6,7 +6,7 @@ class SessionConfig:
         self.prev_time = current_time
         self.tau = tau
         self.t0 = current_time
-        self.rounds = rounds
+        self.rounds = rounds if rounds > 0 else 15
     
     def update(self, sum_p: int, current_time:float, session_reuse: int, rounds: float = -1):
         prev_p = self.prev_p
