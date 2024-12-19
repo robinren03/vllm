@@ -83,5 +83,5 @@ class EmbeddingModelBlockSpaceManager(BlockSpaceManager):
                                       seq_group: SequenceGroup) -> List[int]:
         return None  # type: ignore
 
-    def mark_blocks_as_computed(self, seq_group: SequenceGroup):
+    def mark_blocks_as_computed(self, seq_group: SequenceGroup, token_chunk_size: int):
         pass
