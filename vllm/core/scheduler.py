@@ -362,7 +362,6 @@ class Scheduler:
         if isinstance(request_id, str):
             request_id = (request_id, )
         request_ids = set(request_id)
-        print("Aborted in the abort_seq_group:", request_ids)
 
         for state_queue in [self.waiting, self.running, self.swapped]:
             aborted_groups: List[SequenceGroup] = []
@@ -505,7 +504,6 @@ class Scheduler:
                 self._append_slots(seq_group, blocks_to_copy)
                 is_prefill = seq_group.is_prefill()
                 if is_prefill:
-                    print("[Error] Prefill sequence group in running", seq_group.request_id)
                     prefill_seq_groups.append(
                         ScheduledSequenceGroup(
                             seq_group=seq_group,
@@ -882,8 +880,8 @@ class Scheduler:
         assert len(running_scheduled.prefill_seq_groups) == 0
         assert len(swapped_in.prefill_seq_groups) == 0
 
-        print("Prefill sequence groups:", [seq_group.seq_group.request_id for seq_group in prefills.seq_groups])
-        print("Decoding sequence groups:", [seq_group.seq_group.request_id for seq_group in running_scheduled.decode_seq_groups])
+        # print("Prefill sequence groups:", [seq_group.seq_group.request_id for seq_group in prefills.seq_groups])
+        # print("Decoding sequence groups:", [seq_group.seq_group.request_id for seq_group in running_scheduled.decode_seq_groups])
 
         sched_output = SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
@@ -902,7 +900,7 @@ class Scheduler:
             preempted=preempted,
         )
 
-        print("Is empty? is waiting?", sched_output.is_empty(), len(self.waiting))
+        # print("Is empty? is waiting?", sched_output.is_empty(), len(self.waiting))
         if sched_output.is_empty() and len(self.waiting) > 0:
             # print("Lazy detection")
             assert session_id_block or session_id_arrived

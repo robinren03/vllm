@@ -181,7 +181,7 @@ class OpenAIServingChat(OpenAIServing):
             
             if "Llama-3" in request.model:
                 session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse)
-                print("Session Reuse: ", session_reuse)
+                # print("Session Reuse: ", session_reuse)
 
 
             if mm_data is not None:

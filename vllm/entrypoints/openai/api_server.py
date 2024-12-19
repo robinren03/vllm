@@ -154,7 +154,7 @@ async def create_chat_completion(request: ChatCompletionRequest,
     if request.request_stop:
         await openai_serving_chat.remove_session(request.session_id)
         return Response(content="good")
-      
+    
     generator = await openai_serving_chat.create_chat_completion(
         request, raw_request)
     if isinstance(generator, ErrorResponse):
