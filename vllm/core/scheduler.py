@@ -362,6 +362,7 @@ class Scheduler:
         if isinstance(request_id, str):
             request_id = (request_id, )
         request_ids = set(request_id)
+        # print("Aborted in the abort_seq_group:", request_ids)
 
         for state_queue in [self.waiting, self.running, self.swapped]:
             aborted_groups: List[SequenceGroup] = []
@@ -377,7 +378,7 @@ class Scheduler:
             for aborted_group in aborted_groups:
                 # Remove the sequence group from the state queue.
                 state_queue.remove(aborted_group)
-                print("Successfully removed:", aborted_group.request_id)
+                # print("Successfully removed:", aborted_group.request_id)
                 self._finished_requests_ids.append(aborted_group.request_id)
                 for seq in aborted_group.get_seqs():
                     if seq.is_finished():

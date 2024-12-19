@@ -1063,7 +1063,8 @@ class LLMEngine:
         
         current_time = round(time.time(), 2)
         gpu_cache_guess = sum_sps(self.session_configs.values(), self.model_config.max_model_len, current_time, num_total_gpu)
-        delta = real_gpu_cache_usage_sys - gpu_cache_guess[0][1]
+        # delta = num_total_gpu * real_gpu_cache_usage_sys * 16 - gpu_cache_guess[0][1]
+        # print("gpu_cache_guess", gpu_cache_guess, "real gpu", num_total_gpu * real_gpu_cache_usage_sys * 16, "time", current_time)
         import math
         self.gpu_cache_guess = [(time, usage + delta * math.exp((current_time - time) * self.time_lr)) for time, usage in gpu_cache_guess]
         
