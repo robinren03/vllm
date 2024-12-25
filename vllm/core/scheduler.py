@@ -404,6 +404,73 @@ class Scheduler:
         self._finished_requests_ids = list()
         return finished_requests_ids
 
+
+    def semi_opt_evict(self, 
+        seq_group: SequenceGroup,
+        running_queue: deque,
+        budget: SchedulingBudget,
+        curr_loras: Optional[Set[int]],
+        enable_chunking: bool = False,
+        finished_queue: deque = None,
+        session_id_block: Dict[str, int] = None,
+        session_id_arrived: Dict[str, int] = None) -> None:
+
+
+        # Blocks that need to be swapped or copied before model execution.
+        blocks_to_swap_out: List[Tuple[int, int]] = []
+        preempted: List[SequenceGroup] = []
+        swapped_out: List[SequenceGroup] = []
+
+        num_running_tokens = self._get_num_new_tokens(
+                seq_group, SequenceStatus.RUNNING, enable_chunking, budget)
+        
+        while not self._can_append_slots(seq_group):
+            budget.subtract_num_batched_tokens(seq_group.request_id,
+                                                num_running_tokens)
+            num_running_seqs = seq_group.get_max_num_running_seqs()
+            budget.subtract_num_seqs(seq_group.request_id,
+                                        num_running_seqs)
+
+            if (curr_loras is not None and seq_group.lora_int_id > 0
+                    and seq_group.lora_int_id in curr_loras):
+                curr_loras.remove(seq_group.lora_int_id)
+            
+            # IMPORTANT: Eviction Policy Part Here
+
+            if finished_queue is not None and len(finished_queue) > 0:
+                required_slot = self._required_slots(seq_group)
+                victim_seq: Sequence = finished_queue[0]
+                self.free_seq(victim_seq)
+                finished_queue.popleft()
+            elif session_id_block is not None and len(session_id_block) > 0:
+                seq_id = session_id_block.pop()
+                self.free_seq_id(seq_id)
+            elif session_id_arrived is not None and len(session_id_arrived) > 0:
+                seq_id = session_id_arrived.pop()
+                self.free_seq_id(seq_id)
+            elif running_queue:
+                # Preempt the lowest-priority sequence groups.
+                victim_seq_group = running_queue.pop()
+                preempted_mode = self._preempt(victim_seq_group,
+                                                blocks_to_swap_out)
+                if preempted_mode == PreemptionMode.RECOMPUTE:
+                    preempted.append(victim_seq_group)
+                else:
+                    swapped_out.append(victim_seq_group)
+            else:
+                # No other sequence groups can be preempted.
+                # Preempt the current sequence group.
+                preempted_mode = self._preempt(seq_group,
+                                                blocks_to_swap_out)
+                if preempted_mode == PreemptionMode.RECOMPUTE:
+                    preempted.append(seq_group)
+                else:
+                    swapped_out.append(seq_group)
+                return False, blocks_to_swap_out, preempted, swapped_out
+        
+        return True, blocks_to_swap_out, preempted, swapped_out
+    
+    
     def _schedule_running(
         self,
         running_queue: deque,
@@ -460,52 +527,18 @@ class Scheduler:
                 break
 
             running_queue.popleft()
-            while not self._can_append_slots(seq_group):
-                budget.subtract_num_batched_tokens(seq_group.request_id,
-                                                   num_running_tokens)
-                num_running_seqs = seq_group.get_max_num_running_seqs()
-                budget.subtract_num_seqs(seq_group.request_id,
-                                         num_running_seqs)
-
-                if (curr_loras is not None and seq_group.lora_int_id > 0
-                        and seq_group.lora_int_id in curr_loras):
-                    curr_loras.remove(seq_group.lora_int_id)
-
-                if finished_queue is not None and len(finished_queue) > 0:
-                    required_slot = self._required_slots(seq_group)
-                    victim_seq: Sequence = finished_queue[0]
-                    self.free_seq(victim_seq)
-                    finished_queue.popleft()
-                elif session_id_block is not None and len(session_id_block) > 0:
-                    seq_id = session_id_block.pop()
-                    self.free_seq_id(seq_id)
-                elif session_id_arrived is not None and len(session_id_arrived) > 0:
-                    seq_id = session_id_arrived.pop()
-                    self.free_seq_id(seq_id)
-                elif running_queue:
-                    # Preempt the lowest-priority sequence groups.
-                    victim_seq_group = running_queue.pop()
-                    preempted_mode = self._preempt(victim_seq_group,
-                                                   blocks_to_swap_out)
-                    if preempted_mode == PreemptionMode.RECOMPUTE:
-                        preempted.append(victim_seq_group)
-                    else:
-                        swapped_out.append(victim_seq_group)
-                else:
-                    # No other sequence groups can be preempted.
-                    # Preempt the current sequence group.
-                    preempted_mode = self._preempt(seq_group,
-                                                   blocks_to_swap_out)
-                    if preempted_mode == PreemptionMode.RECOMPUTE:
-                        preempted.append(seq_group)
-                    else:
-                        swapped_out.append(seq_group)
-                    break
-            else:
+            succ, _blocks_to_swap_out, _preempted, _swapped_out = \
+                self.semi_opt_evict(seq_group, running_queue, budget, curr_loras, \
+                                    enable_chunking, finished_queue, session_id_block, session_id_arrived)
+            
+            blocks_to_swap_out.extend(_blocks_to_swap_out)
+            preempted.extend(_preempted)
+            swapped_out.extend(_swapped_out)
+            if succ:
                 self._append_slots(seq_group, blocks_to_copy)
+
                 is_prefill = seq_group.is_prefill()
                 if is_prefill:
-                    print("[Error] Prefill sequence group in running", seq_group.request_id)
                     prefill_seq_groups.append(
                         ScheduledSequenceGroup(
                             seq_group=seq_group,
@@ -824,7 +857,7 @@ class Scheduler:
             self.swapped, SchedulerSwappedInOutputs.create_empty())
 
         # If any requests are swapped, prioritized swapped requests.
-        if not self.swapped and len(remaining_running) < 15:
+        if not self.swapped:
             remaining_waiting, prefills = self._schedule_prefills(
                 self.waiting, budget, curr_loras, enable_chunking=False)
             for seq_group in prefills.seq_groups:
@@ -919,7 +952,7 @@ class Scheduler:
             return sched_output
         
 
-    def _schedule_chunked_prefill(self):
+    def _schedule_chunked_prefill(self, session_id_block:Dict[str, int], session_id_arrived: Dict[str, int]):
         """Schedule queued requests.
         
         Chunked prefill allows to chunk prefill requests, batch them together
@@ -954,7 +987,9 @@ class Scheduler:
             curr_loras,
             fcfs_policy,
             enable_chunking=True,
-            finished_queue=self._finished_queue)
+            finished_queue=self._finished_queue,
+            session_id_block=session_id_block,
+            session_id_arrived=session_id_arrived)
 
         # Schedule swapped out requests.
         # If preemption happens, it means we don't have space for swap-in.
@@ -988,7 +1023,7 @@ class Scheduler:
         # Update swapped requests.
         self.swapped = remaining_swapped
         self.swapped.extend(running_scheduled.swapped_out)
-        return SchedulerOutputs(
+        sched_output = SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
                                   running_scheduled.prefill_seq_groups +
                                   swapped_in.prefill_seq_groups +
@@ -1010,10 +1045,24 @@ class Scheduler:
                        len(running_scheduled.swapped_out)),
         )
 
+        if sched_output.is_empty() and len(self.waiting) > 0:
+            assert session_id_block or session_id_arrived
+            if session_id_block:
+                session_id, seq_id = list(session_id_block.items())[0] 
+                self.free_seq_id(seq_id)
+                del session_id_block[session_id]
+            else:
+                session_id, seq_id = list(session_id_arrived.items())[0]
+                self.free_seq_id(seq_id)
+                del session_id_arrived[session_id]
+            return self._schedule_chunked_prefill(session_id_block, session_id_arrived)
+        else:
+            return sched_output
+
     def _schedule(self, session_id_block, session_id_arrived) -> SchedulerOutputs:
         """Schedule queued requests."""
         if self.scheduler_config.chunked_prefill_enabled:
-            return self._schedule_chunked_prefill()
+            return self._schedule_chunked_prefill(session_id_block, session_id_arrived)
         else:
             return self._schedule_default(session_id_block, session_id_arrived)
 
@@ -1069,12 +1118,9 @@ class Scheduler:
                 common_computed_block_nums = (
                     self.block_manager.get_common_computed_block_ids(
                         seq_group.get_seqs(status=SequenceStatus.RUNNING)))
-                # print("Prefix len", len(common_computed_block_nums))
-                # print("Semi-ready time", time.time() - seq_group.metrics.arrival_time)
             else:
                 common_computed_block_nums = seq_group.computed_block_nums
             
-            # print(f"Computed block seq: {seq_group.computed_block_seq}, common_computed_block_nums: {common_computed_block_nums}")
 
             do_sample = True
             if seq_group.is_prefill():
@@ -1342,7 +1388,7 @@ class Scheduler:
         # in a decode phase. Do not chunk.
         if enable_chunking and len(seqs) == 1:
             remaining_token_budget = budget.remaining_token_budget()
-            if self.cache_config.enable_prefix_caching:
+            if self.cache_config.enable_prefix_caching or seq_group.session_reuse > 0:
                 # When prefix caching is enabled, we always allocate
                 # the number of new tokens that is dividable by the block size
                 # to avoid partial block matching.

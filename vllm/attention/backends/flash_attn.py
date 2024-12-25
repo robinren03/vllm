@@ -519,6 +519,7 @@ class FlashAttentionImpl(AttentionImpl):
                 # normal attention
                 # When block_tables are not filled, it means q and k are the
                 # prompt, and they have the same length.
+                # print("Normal Attention")
                 out = flash_attn_varlen_func(
                     q=query,
                     k=key,
@@ -536,6 +537,7 @@ class FlashAttentionImpl(AttentionImpl):
                 output[:num_prefill_tokens] = out
             else:
                 # prefix-enabled attention
+                # print("Prefix-enabled attention")
                 assert prefill_meta.seq_lens is not None
                 max_seq_len = max(prefill_meta.seq_lens)
                 output[:num_prefill_tokens] = flash_attn_varlen_func(
