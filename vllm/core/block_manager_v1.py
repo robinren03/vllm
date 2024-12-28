@@ -264,6 +264,13 @@ class BlockSpaceManagerV1(BlockSpaceManager):
     def _get_seq_num_required_blocks(self, seq: Sequence) -> int:
         return 0 if seq is None else seq.n_blocks
 
+    def _get_seq_group_required_blocks(self, seq_group: SequenceGroup) -> int:
+        # Get required blocks for prefilling
+        self_num_required_blocks = self._get_seq_num_required_blocks(
+            seq_group.get_seqs(status=SequenceStatus.WAITING)[0]) - \
+                min(len(self.block_tables.get(seq_group.computed_block_seq, [])), seq_group.session_reuse // self.block_size)
+        return self_num_required_blocks
+    
     def can_allocate(self, seq_group: SequenceGroup) -> AllocStatus:
         # FIXME(woosuk): Here we assume that all sequences in the group share
         # the same prompt. This may not be true for preempted sequences.
@@ -271,7 +278,9 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 
         self_num_required_blocks = self._get_seq_num_required_blocks(
-            seq_group.get_seqs(status=SequenceStatus.WAITING)[0]) - len(self.block_tables.get(seq_group.computed_block_seq, []))
+            seq_group.get_seqs(status=SequenceStatus.WAITING)[0]) - \
+                min(len(self.block_tables.get(seq_group.computed_block_seq, [])), seq_group.session_reuse // self.block_size)
+        
         cross_num_required_blocks = self._get_seq_num_required_blocks(
             seq_group.get_encoder_seq())
         num_required_blocks = self_num_required_blocks + \
@@ -339,8 +348,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 block.ref_count = ref_count
             block_table.append(block)
 
-        # seq.data._num_computed_tokens = computed_len * self.block_size
-        # print("Block table len:", len(block_table), ", Computed len:", computed_len)
         return block_table, computed_len
 
     def allocate(self, seq_group: SequenceGroup) -> None:

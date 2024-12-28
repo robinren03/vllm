@@ -316,7 +316,7 @@ class Sequence:
 
     @property
     def n_blocks(self) -> int:
-        assert (self.finished_removed == 0 or self.status == SequenceStatus.FINISHED_STOPPED or self.status == SequenceStatus.FINISHED_LENGTH_CAPPED)
+        assert (self.finished_removed == 0 or self.status == SequenceStatus.FINISHED_STOPPED or self.status == SequenceStatus.FINISHED_LENGTH_CAPPED), f"finished_removed: {self.finished_removed}, status: {self.status}"
         return math.ceil(self.get_len() / self.block_size) - self.finished_removed
 
     @property
