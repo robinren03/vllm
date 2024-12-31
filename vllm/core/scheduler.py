@@ -1006,6 +1006,7 @@ class Scheduler:
             if curr_loras is not None and lora_int_id > 0:
                 curr_loras.add(lora_int_id)
             waiting_queue.popleft()
+            # print("Session reuse", seq_group.session_reuse)
             self._allocate_and_set_running(seq_group)
             if seq_group.session_id in session_id_arrived:
                 session_id_arrived.pop(seq_group.session_id)
@@ -1058,6 +1059,8 @@ class Scheduler:
 
         # If any requests are swapped, prioritized swapped requests.
         if not self.swapped:
+            # for session_id, seq_id in session_id_arrived.items():
+            #     print("Session ID arrived:", session_id, seq_id, len(self.block_manager.block_tables.get(seq_id, [])))
             remaining_waiting, prefills = self._schedule_prefills(
                 self.waiting, budget, curr_loras, enable_chunking=False, session_id_arrived=session_id_arrived)
             for seq_group in prefills.seq_groups:

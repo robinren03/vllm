@@ -288,7 +288,9 @@ class Sequence:
             block_size: int,
             eos_token_id: Optional[int] = None,
             lora_request: Optional[LoRARequest] = None,
-            prompt_adapter_request: Optional[PromptAdapterRequest] = None
+            prompt_adapter_request: Optional[PromptAdapterRequest] = None,
+            prefix_offset: Optional[int] = 0,
+            tail_offset: Optional[int] = 0
     ) -> None:
         self.seq_id = seq_id
         self.inputs = inputs
@@ -313,6 +315,10 @@ class Sequence:
 
         # Input + output tokens
         self.tokens: Optional[List[str]] = None
+
+        # set prefix and tail offset
+        self.prefix_offset = prefix_offset
+        self.tail_offset = tail_offset
 
     @property
     def n_blocks(self) -> int:

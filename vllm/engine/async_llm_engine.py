@@ -245,6 +245,13 @@ class _AsyncLLMEngine(LLMEngine):
         and updates the scheduler with the model outputs. Finally, it decodes
         the sequences and returns the newly generated results.
         """
+        current_time = time.time()
+        if (current_time - self.last_arragement) > 1:
+            self.remove_dead_session(self.session_id_blocks[virtual_engine], current_time)
+            self.session_id_blocks[virtual_engine] = dict(sorted(self.session_id_blocks[virtual_engine].items(), 
+                            key=lambda item: self.get_session_block_rank(item[0], current_time)), reverse=True)
+            self.last_arragement = current_time
+        
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
             virtual_engine].schedule(self.session_id_blocks[virtual_engine], self.session_id_arrived[virtual_engine])
 

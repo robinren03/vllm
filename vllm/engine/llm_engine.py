@@ -237,6 +237,7 @@ class LLMEngine:
         self.observability_config = observability_config or ObservabilityConfig(
         )
         self.log_stats = log_stats
+        self.last_arragement = 0
         if not self.model_config.skip_tokenizer_init:
             self.tokenizer = self._init_tokenizer()
             self.detokenizer = Detokenizer(self.tokenizer)
@@ -367,6 +368,28 @@ class LLMEngine:
                     self.get_tokenizer_for_seq,
                 ),
             ))
+
+    def remove_dead_session(self, session_id_block:Dict[str,int], current_time: float):
+        keys = list(session_id_block.keys()).copy()
+        for session_id in keys:
+            session_config = self.session_configs.get(session_id, SessionConfig(0, 0, 0, 3, current_time - 3 ,0))
+            if current_time > session_config.prev_time + 120:
+                self.free_session(session_id)
+
+    def get_session_block_rank(self, session_id: str, current_time: float) -> int:
+        session_config = self.session_configs.get(session_id, SessionConfig(0, 0, 0, 3, current_time - 3 ,0))
+        prev_time = session_config.prev_time
+        tau = session_config.tau
+
+        # 计算rank的逻辑
+        if current_time - prev_time <= tau:
+            rank = prev_time + tau
+        elif current_time - prev_time <= 5 * tau:
+            rank = current_time + prev_time + tau
+        else:
+            rank = current_time * 4 - prev_time
+
+        return rank
 
     def _initialize_kv_caches(self) -> None:
         """Initialize the KV cache in the worker(s).
@@ -970,6 +993,15 @@ class LLMEngine:
             raise NotImplementedError(
                 "Pipeline parallelism is only supported through AsyncLLMEngine "
                 "as performance will be severely degraded otherwise.")
+        
+        # 使用sorted按rank排序
+        current_time = time.time()
+        if (current_time - self.last_arragement) > 1:
+            self.remove_dead_session(self.session_id_blocks[0], current_time)
+            self.session_id_blocks[0] = dict(sorted(self.session_id_blocks[0].items(), 
+                            key=lambda item: self.get_session_block_rank(item[0], current_time)), reverse=True)
+            self.last_arragement = current_time
+
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
             0].schedule(self.session_id_blocks[0], self.session_id_arrived[0])
 

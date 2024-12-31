@@ -314,7 +314,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         if (len(block_table) > 0):
             del self.block_tables[computed_block_seq]
 
-        # print(f"Session reuse:{session_reuse}, Sequence block:{seq.n_blocks}, Block table len:{len(block_table)}")
         if (session_reuse == -1): session_reuse = 0
         
         computed_len = min(len(block_table), session_reuse // self.block_size)
