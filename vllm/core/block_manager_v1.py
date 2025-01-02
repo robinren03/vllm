@@ -268,7 +268,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # Get required blocks for prefilling
         self_num_required_blocks = self._get_seq_num_required_blocks(
             seq_group.get_seqs(status=SequenceStatus.WAITING)[0]) - \
-                min(len(self.block_tables.get(seq_group.computed_block_seq, [])), seq_group.session_reuse // self.block_size)
+                (seq_group.computed_block_seq.n_blocks if seq_group.computed_block_seq else 0)
         return self_num_required_blocks
     
     def can_allocate(self, seq_group: SequenceGroup) -> AllocStatus:
@@ -279,7 +279,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
         self_num_required_blocks = self._get_seq_num_required_blocks(
             seq_group.get_seqs(status=SequenceStatus.WAITING)[0]) - \
-                min(len(self.block_tables.get(seq_group.computed_block_seq, [])), seq_group.session_reuse // self.block_size)
+                (seq_group.computed_block_seq.n_blocks if seq_group.computed_block_seq else 0)
         
         cross_num_required_blocks = self._get_seq_num_required_blocks(
             seq_group.get_encoder_seq())
@@ -292,6 +292,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                                       self.block_sliding_window)
         num_free_gpu_blocks = self.gpu_allocator.get_num_free_blocks()
 
+        seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
+
         # Use watermark to avoid frequent cache eviction.
         if (self.num_total_gpu_blocks - num_required_blocks <
                 self.watermark_blocks):
@@ -303,16 +305,19 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
     def _allocate_sequence(self, \
                            seq: Sequence, \
-                           computed_block_seq: int, \
+                           computed_block_seq: Sequence, \
                            session_reuse: int, \
                            ref_count: int, \
                            is_encoder_decoder: bool = True) -> Tuple[BlockTable, int]:
         # Allocate new physical token blocks that will store the prompt tokens.
         num_prompt_blocks = seq.n_blocks
-        block_table: BlockTable = self.block_tables.get(computed_block_seq, [])
+        if computed_block_seq:
+            block_table: BlockTable = self.block_tables.get(computed_block_seq.seq_id, [])
+        else:
+            block_table: BlockTable = []
         
         if (len(block_table) > 0):
-            del self.block_tables[computed_block_seq]
+            self.block_tables.pop(computed_block_seq.seq_id)
 
         if (session_reuse == -1): session_reuse = 0
         
@@ -478,8 +483,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # If we need to allocate a new physical block
         if len(block_table) < n_blocks:
             # Currently this code only supports adding one physical block
-            assert len(block_table) == n_blocks - 1
-
+            assert len(block_table) == n_blocks - 1, f"{len(block_table)} != {n_blocks - 1}, {seq.is_prefill()}, {seq.status}, {seq.finished_removed}"
             if (self.block_sliding_window
                     and len(block_table) >= self.block_sliding_window):
                 # reuse a block
@@ -657,6 +661,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
     def free(self, seq: Sequence) -> None:
         if seq.seq_id not in self.block_tables:
             # Already freed or haven't been scheduled yet.
+            print("Failed to free seq_id", seq.seq_id)
             return
         block_table = self.block_tables[seq.seq_id]
         self._free_block_table(block_table)
@@ -665,6 +670,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
     def free_seq_id(self, seq_id: int) -> None:
         if seq_id not in self.block_tables:
             # Already freed or haven't been scheduled yet.
+            print("Failed to free seq_id", seq_id)
             return
         block_table = self.block_tables[seq_id]
         self._free_block_table(block_table)

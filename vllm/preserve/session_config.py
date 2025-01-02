@@ -25,3 +25,6 @@ class SessionConfig:
         self.prev_time = current_time
 
         if (rounds > 0): self.rounds = rounds
+    
+    def __str__(self):
+        return f"ip: {self.ip}, p: {self.p}, tau: {self.tau}, t0: {self.t0}"

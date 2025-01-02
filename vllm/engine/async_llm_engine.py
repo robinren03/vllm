@@ -249,12 +249,12 @@ class _AsyncLLMEngine(LLMEngine):
         if (current_time - self.last_arragement) > 1:
             self.remove_dead_session(self.session_id_blocks[virtual_engine], current_time)
             self.session_id_blocks[virtual_engine] = dict(sorted(self.session_id_blocks[virtual_engine].items(), 
-                            key=lambda item: self.get_session_block_rank(item[0], current_time)), reverse=True)
+                            key=lambda item: self.get_session_block_rank(item[0], current_time), reverse=True))
             self.last_arragement = current_time
         
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
             virtual_engine].schedule(self.session_id_blocks[virtual_engine], self.session_id_arrived[virtual_engine])
-
+        
         if not scheduler_outputs.is_empty():
             # Execute the model.
             finished_requests_ids = self.scheduler[
@@ -282,7 +282,6 @@ class _AsyncLLMEngine(LLMEngine):
 
         # Tracing
         self.do_tracing(scheduler_outputs)
-
         return request_outputs
 
     async def stop_remote_worker_execution_loop_async(self) -> None:

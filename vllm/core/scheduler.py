@@ -335,7 +335,7 @@ class Scheduler:
                                        if self.enable_artificial_preemption
                                        else 0)
         self.num_cumulative_preemption: int = 0
-        self.last_waiting_len = 0
+        self.last_waiting_len = (0,0,0)
 
     @property
     def lora_enabled(self) -> bool:
@@ -366,7 +366,6 @@ class Scheduler:
         if isinstance(request_id, str):
             request_id = (request_id, )
         request_ids = set(request_id)
-        # print("Aborted in the abort_seq_group:", request_ids)
 
         for state_queue in [self.waiting, self.running, self.swapped]:
             aborted_groups: List[SequenceGroup] = []
@@ -382,7 +381,6 @@ class Scheduler:
             for aborted_group in aborted_groups:
                 # Remove the sequence group from the state queue.
                 state_queue.remove(aborted_group)
-                # print("Successfully removed:", aborted_group.request_id)
                 self._finished_requests_ids.append(aborted_group.request_id)
                 for seq in aborted_group.get_seqs():
                     if seq.is_finished():
@@ -416,8 +414,8 @@ class Scheduler:
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
         finished_queue: deque = None,
-        session_id_block: Dict[str, int] = None,
-        session_id_arrived: Dict[str, int] = None) -> None:
+        session_id_block: Dict[str,Sequence] = None,
+        session_id_arrived: Dict[str, Sequence] = None) -> None:
 
 
         # Blocks that need to be swapped or copied before model execution.
@@ -446,12 +444,14 @@ class Scheduler:
                 victim_seq: Sequence = finished_queue[0]
                 self.free_seq(victim_seq)
                 finished_queue.popleft()
-            elif session_id_block is not None and len(session_id_block) > 0:
-                seq_id = session_id_block.pop(list(session_id_block.keys())[0])
-                self.free_seq_id(seq_id)
-            elif session_id_arrived is not None and len(session_id_arrived) > 0:
-                seq_id = session_id_arrived.pop(list(session_id_arrived.keys())[0])
-                self.free_seq_id(seq_id)
+            elif session_id_block:
+                seq = session_id_block.pop(list(session_id_block.keys())[0])
+                print("[EVICTION OPT] Evicting", seq.seq_id)
+                self.free_seq(seq)
+            elif session_id_arrived:
+                seq = session_id_arrived.pop(list(session_id_arrived.keys())[0])
+                print("[EVICTION OPT] Evicting", seq.seq_id)
+                self.free_seq(seq)
             elif running_queue:
                 # Preempt the lowest-priority sequence groups.
                 victim_seq_group = running_queue.pop()
@@ -464,6 +464,7 @@ class Scheduler:
             else:
                 # No other sequence groups can be preempted.
                 # Preempt the current sequence group.
+
                 preempted_mode = self._preempt(seq_group,
                                                 blocks_to_swap_out)
                 if preempted_mode == PreemptionMode.RECOMPUTE:
@@ -481,8 +482,8 @@ class Scheduler:
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
         finished_queue: deque = None,
-        session_id_block: Dict[str, int] = None,
-        session_id_arrived: Dict[str, int] = None) -> None:
+        session_id_block: Dict[str,Sequence] = None,
+        session_id_arrived: Dict[str, Sequence] = None) -> None:
 
 
         # Blocks that need to be swapped or copied before model execution.
@@ -518,11 +519,11 @@ class Scheduler:
                 best_session, best_id = evictable_items[0]
                 best_idx = 0
                 min_val = len(self.block_manager.block_tables.get(best_id,[]))
-                for idx, (session_id, seq_id) in enumerate(evictable_items[1:], start=1):
-                    val = len(self.block_manager.block_tables.get(seq_id,[])) * (idx + 1)
+                for idx, (session_id, seq) in enumerate(evictable_items[1:], start=1):
+                    val = len(self.block_manager.block_tables.get(seq.seq_id,[])) * (idx + 1)
                     if val < min_val:
                         min_val = val
-                        best_id = seq_id
+                        best_id = seq.seq_id
                         best_session = session_id
                         best_idx = idx
                 
@@ -555,11 +556,10 @@ class Scheduler:
     
 
     def origin_forced_evict(self, 
-                            session_id_block: Dict[str, int],
-                            session_id_arrived: Dict[str, int],
+                            session_id_block: Dict[str,Sequence],
+                            session_id_arrived: Dict[str, Sequence],
                             budget: SchedulingBudget = None,
                             forced_evict: bool = True) -> bool:
-         # print("Lazy detection")
         if len(self.waiting) == 0:
             return False
         
@@ -568,21 +568,21 @@ class Scheduler:
         
         assert session_id_block or session_id_arrived
         if session_id_block:
-            session_id, seq_id = list(session_id_block.items())[0] 
-            self.free_seq_id(seq_id)
-            del session_id_block[session_id]
+            session_id, seq = list(session_id_block.items())[0] 
+            self.free_seq(seq)
+            session_id_block.pop(session_id)
         else:
-            session_id, seq_id = list(session_id_arrived.items())[0]
-            self.free_seq_id(seq_id)
-            del session_id_arrived[session_id]
+            session_id, seq = list(session_id_arrived.items())[0]
+            self.free_seq(seq)
+            session_id_arrived.pop(session_id)
         return True
     
     def _get_seq_group_required_blocks(self, seq_group: SequenceGroup) -> int:
         return self.block_manager._get_seq_group_required_blocks(seq_group)
     
     def dynamic_forced_evict(self,
-                             session_id_block: Dict[str, int],
-                             session_id_arrived: Dict[str, int],
+                             session_id_block: Dict[str,Sequence],
+                             session_id_arrived: Dict[str, Sequence],
                              budget: SchedulingBudget,
                              forced_evict: bool = True) -> bool:
     
@@ -592,7 +592,8 @@ class Scheduler:
             info, p, v = zip(*items)
             max_p_sum = sum(p)
 
-            if max_p_sum <= M:
+            print("Slots required:", M, 'Max slots:', max_p_sum)
+            if max_p_sum < M:
                 return -1, [], 0
             
             # 初始化 DP 数组
@@ -614,53 +615,64 @@ class Scheduler:
     
 
         assert (not forced_evict) or session_id_block or session_id_arrived
+
         if (not session_id_block) and (not session_id_arrived):
             return False
-    
+
+        # print("[Session id blocks]", session_id_block.keys())
+        # print("[Session id arrived]", session_id_arrived.keys())
+
         evictable_items = list(session_id_block.items()) if session_id_block else []
         if session_id_arrived:
             evictable_items.extend(list(session_id_arrived.items()))
         
-        for idx, (session_id, seq_id) in enumerate(evictable_items.copy()):
-            saved_len = len(self.block_manager.block_tables.get(seq_id,[]))
-            evictable_items[idx] = [(session_id, seq_id), saved_len, saved_len * (idx + 1)]
-        
+        for idx, (session_id, seq) in enumerate(evictable_items.copy()):
+            saved_len = seq.n_blocks
+            evictable_items[idx] = [(session_id, seq), saved_len, saved_len * (idx + 1)]
+
         waiting = self.waiting
+        decode_prefill_ratio = self.decode_prefill_ratio * ( 5 - 4*len(self.running)/budget.max_num_seqs)
+
         if len(waiting) == 0:
+            print("[EVICTION DECIDING] No waiting session")
             return False
+        
         search_space = max(1, min(int(budget.max_num_seqs), int(len(waiting))))
         if not forced_evict:
-            best_val = self.decode_prefill_ratio * len(evictable_items)
+            best_val = decode_prefill_ratio * len(evictable_items)
             best_evict = []
         else:
             best_val = float('inf')
             best_evict = []
         
-        slots_required = 0
-        released_size = 0
+        slots_required = max(0, self.block_manager.watermark_blocks - self.block_manager.get_num_free_gpu_blocks())
+        val, evict_items, released_size = decode_prefill_ratio * len(evictable_items), [], 0
 
-        for idx, seqs in enumerate(waiting):
-            if (idx >= search_space):
+        for idx, seqs in enumerate(waiting, start=1):
+            if (idx > search_space):
                 break
             slots_required += self._get_seq_group_required_blocks(seqs)
+            val -= decode_prefill_ratio * (len(evictable_items) - idx + 1)
+            decode_prefill_ratio = self.decode_prefill_ratio * ( 5 - 4 * (idx + len(self.running)) / budget.max_num_seqs)
             if (released_size < slots_required):
                 val, evict_items, released_size = min_vi(evictable_items, slots_required)
-
-            if val == -1:
-                break
-            val += self.decode_prefill_ratio * (len(evictable_items) - idx - 1)
+                if val == -1:
+                    break
+            val += decode_prefill_ratio * (len(evictable_items) - idx)
+            # print("[EVICTION DECIDING]", val, best_val, released_size, slots_required)
             if val < best_val:
                 best_val = val
                 best_evict = evict_items.copy()
         
         if best_evict:
-            for session_id, seq_id in best_evict:
+            for session_id, seq in best_evict:
                 assert (session_id in session_id_block) ^ (session_id in session_id_arrived), f"{session_id} {session_id_block} {session_id_arrived}"
+                print("[EVICTION DECIDED] Evicting", session_id, seq.seq_id)
+                self.free_seq(seq)
                 if session_id in session_id_arrived:
                     session_id_arrived.pop(session_id)
                 else:
                     session_id_block.pop(session_id)
-                self.free_seq_id(seq_id)
             return True
         else:
             return False
@@ -674,8 +686,8 @@ class Scheduler:
         policy: Policy,
         enable_chunking: bool = False,
         finished_queue: deque = None,
-        session_id_block: Dict[str, int] = None,
-        session_id_arrived: Dict[str, int] = None
+        session_id_block: Dict[str,Sequence] = None,
+        session_id_arrived: Dict[str, Sequence] = None
     ) -> Tuple[deque, SchedulerRunningOutputs]:
         """Schedule sequence groups that are running.
 
@@ -731,7 +743,6 @@ class Scheduler:
             swapped_out.extend(_swapped_out)
             if succ:
                 self._append_slots(seq_group, blocks_to_copy)
-
                 is_prefill = seq_group.is_prefill()
                 if is_prefill:
                     prefill_seq_groups.append(
@@ -899,7 +910,7 @@ class Scheduler:
         budget: SchedulingBudget,
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
-        session_id_arrived: Dict[str, int] = []
+        session_id_arrived: Dict[str, Sequence] = []
     ) -> Tuple[deque, SchedulerPrefillOutputs]:
         """Schedule sequence groups that are in prefill stage.
 
@@ -934,6 +945,10 @@ class Scheduler:
         waiting_queue = deque([s for s in waiting_queue])
 
         leftover_waiting_sequences: Deque[SequenceGroup] = deque()
+        
+        break_signal = 0
+
+
         while self._passed_delay(time.time()) and waiting_queue:
             seq_group = waiting_queue[0]
 
@@ -946,9 +961,9 @@ class Scheduler:
             # block_table = self.block_manager.block_tables.get(seq_group.computed_block_seq, [])
             # prefix_len = min(prefix_len, len(block_table) * self.cache_config.block_size)
 
-            num_new_tokens = self._get_num_new_tokens(seq_group,
+            num_new_tokens, offset = self._get_num_new_tokens(seq_group,
                                                       SequenceStatus.WAITING,
-                                                      enable_chunking, budget)
+                                                      enable_chunking, budget, True)
             # num_new_tokens = max(0, num_new_tokens)
 
             if not enable_chunking:
@@ -969,6 +984,7 @@ class Scheduler:
             # If the sequence group cannot be allocated, stop.
             can_allocate = self.block_manager.can_allocate(seq_group)
             if can_allocate == AllocStatus.LATER:
+                break_signal = 1
                 break
             elif can_allocate == AllocStatus.NEVER:
                 logger.warning(
@@ -999,6 +1015,7 @@ class Scheduler:
             if (num_new_tokens == 0
                     or not budget.can_schedule(num_new_tokens=num_new_tokens,
                                                num_new_seqs=num_new_seqs)):
+                break_signal = 2
                 break
             
             # num_new_tokens += prefix_len
@@ -1006,13 +1023,12 @@ class Scheduler:
             if curr_loras is not None and lora_int_id > 0:
                 curr_loras.add(lora_int_id)
             waiting_queue.popleft()
-            # print("Session reuse", seq_group.session_reuse)
             self._allocate_and_set_running(seq_group)
             if seq_group.session_id in session_id_arrived:
                 session_id_arrived.pop(seq_group.session_id)
             seq_groups.append(
                 ScheduledSequenceGroup(seq_group=seq_group,
-                                       token_chunk_size=num_new_tokens))
+                                       token_chunk_size=num_new_tokens + offset))
             budget.add_num_batched_tokens(seq_group.request_id, num_new_tokens)
             budget.add_num_seqs(seq_group.request_id, num_new_seqs)
 
@@ -1024,9 +1040,9 @@ class Scheduler:
         return waiting_queue, SchedulerPrefillOutputs(
             seq_groups=seq_groups,
             ignored_seq_groups=ignored_seq_groups,
-            num_lookahead_slots=self._get_num_lookahead_slots(is_prefill=True))
+            num_lookahead_slots=self._get_num_lookahead_slots(is_prefill=True)), break_signal
 
-    def _schedule_default(self, session_id_block:Dict[str, int], session_id_arrived: Dict[str, int], \
+    def _schedule_default(self, session_id_block: Dict[str, Sequence], session_id_arrived: Dict[str, Sequence], \
                           layer:int = 0, budget: SchedulingBudget=None) -> SchedulerOutputs:
         """Schedule queued requests.
         
@@ -1057,17 +1073,11 @@ class Scheduler:
         remaining_swapped, swapped_in = (
             self.swapped, SchedulerSwappedInOutputs.create_empty())
 
+        budget_break = False
         # If any requests are swapped, prioritized swapped requests.
         if not self.swapped:
-            # for session_id, seq_id in session_id_arrived.items():
-            #     print("Session ID arrived:", session_id, seq_id, len(self.block_manager.block_tables.get(seq_id, [])))
-            remaining_waiting, prefills = self._schedule_prefills(
+            remaining_waiting, prefills, break_signal = self._schedule_prefills(
                 self.waiting, budget, curr_loras, enable_chunking=False, session_id_arrived=session_id_arrived)
-            for seq_group in prefills.seq_groups:
-                if type(seq_group) == ScheduledSequenceGroup:
-                    seq_group = seq_group.seq_group
-                if seq_group.session_id is not None and seq_group.session_id in session_id_arrived:
-                    del session_id_arrived[seq_group.session_id]
 
         fcfs_policy = PolicyFactory.get_policy(policy_name="fcfs")
         # Don't schedule decodes if prefills are scheduled.
@@ -1100,7 +1110,7 @@ class Scheduler:
         self.waiting.extendleft(running_scheduled.preempted)
 
         # Update new running requests.
-        self.running = remaining_running
+        self.running = remaining_running.copy()
         self.running.extend([s.seq_group for s in prefills.seq_groups])
         self.running.extend(
             [s.seq_group for s in running_scheduled.decode_seq_groups])
@@ -1117,9 +1127,6 @@ class Scheduler:
         # doesn't allow chunked prefills.
         assert len(running_scheduled.prefill_seq_groups) == 0
         assert len(swapped_in.prefill_seq_groups) == 0
-
-        # print("Prefill sequence groups:", [seq_group.seq_group.request_id for seq_group in prefills.seq_groups])
-        # print("Decoding sequence groups:", [seq_group.seq_group.request_id for seq_group in running_scheduled.decode_seq_groups])
 
         sched_output = SchedulerOutputs(
             scheduled_seq_groups=(prefills.seq_groups +
@@ -1138,9 +1145,8 @@ class Scheduler:
             preempted=preempted,
         )
 
-        # print("Is empty? is waiting?", sched_output.is_empty(), len(self.waiting))
         if len(self.waiting) > 0 and layer < 5 and not remaining_running and \
-             budget.can_schedule(num_new_seqs=1, num_new_tokens=1):
+             budget.can_schedule(num_new_seqs=1, num_new_tokens=1) and not budget_break:
             succ = self.dynamic_forced_evict(session_id_block, session_id_arrived, budget, sched_output.is_empty())
             if succ:
                 return self._schedule_default(session_id_block, session_id_arrived, layer + (1 if sched_output.is_empty() else 0))
@@ -1150,7 +1156,7 @@ class Scheduler:
             return sched_output
         
 
-    def _schedule_chunked_prefill(self, session_id_block:Dict[str, int], session_id_arrived: Dict[str, int]):
+    def _schedule_chunked_prefill(self, session_id_block: Dict[str, Sequence], session_id_arrived: Dict[str, Sequence]):
         """Schedule queued requests.
         
         Chunked prefill allows to chunk prefill requests, batch them together
@@ -1192,6 +1198,8 @@ class Scheduler:
                     finished_queue=self._finished_queue,
                     session_id_block=session_id_block,
                     session_id_arrived=session_id_arrived)
+            
+                current_rm_len = len(remaining_running)
 
             # Schedule swapped out requests.
             # If preemption happens, it means we don't have space for swap-in.
@@ -1201,7 +1209,7 @@ class Scheduler:
                     self.swapped, budget, curr_loras, fcfs_policy)
 
             # Schedule new prefills.
-            remaining_waiting, prefills = self._schedule_prefills(
+            remaining_waiting, prefills, break_signal = self._schedule_prefills(
                 self.waiting, budget, curr_loras, enable_chunking=True, session_id_arrived=session_id_arrived)
 
             assert (budget.num_batched_tokens <=
@@ -1210,21 +1218,26 @@ class Scheduler:
 
             # Update waiting requests.
             self.waiting = remaining_waiting
-            self.waiting.extendleft(running_scheduled.preempted)
             # Update new running requests.
-            self.running = remaining_running
+            if (num_round == 0):
+                self.waiting.extendleft(running_scheduled.preempted)
+                self.running = remaining_running
+                self.running.extend(
+                    [s.seq_group for s in running_scheduled.decode_seq_groups])
+                self.running.extend(
+                    [s.seq_group for s in running_scheduled.prefill_seq_groups])
+                
             self.running.extend([s.seq_group for s in prefills.seq_groups])
-            self.running.extend(
-                [s.seq_group for s in running_scheduled.decode_seq_groups])
-            self.running.extend(
-                [s.seq_group for s in running_scheduled.prefill_seq_groups])
             self.running.extend(
                 [s.seq_group for s in swapped_in.decode_seq_groups])
             self.running.extend(
                 [s.seq_group for s in swapped_in.prefill_seq_groups])
             # Update swapped requests.
             self.swapped = remaining_swapped
-            self.swapped.extend(running_scheduled.swapped_out)
+            
+            if (num_round == 0):
+                self.swapped.extend(running_scheduled.swapped_out)
+            
             sched_output = SchedulerOutputs(
                 scheduled_seq_groups=(prefills.seq_groups +
                                     running_scheduled.prefill_seq_groups +
@@ -1247,25 +1260,34 @@ class Scheduler:
                         len(running_scheduled.swapped_out)),
             )
 
-            if len(self.waiting) > 0 and not remaining_running and\
-                budget.can_schedule(num_new_seqs=1, num_new_tokens=1):
+            # if (break_signal == 2): print("Budget", budget.num_batched_tokens, budget.num_curr_seqs)
+            # elif (break_signal == 1): print("Allocation", len(self.waiting), budget.can_schedule(num_new_seqs=1, num_new_tokens=1)
+            
+            if len(self.waiting) > 0 and current_rm_len==0 and\
+                budget.can_schedule(num_new_seqs=1, num_new_tokens=1) and break_signal == 1:
                 if not sched_output.is_empty():
                     num_round += 1
+
                 if num_round >= 5:
-                    self.last_waiting_len = 0
+                    self.last_waiting_len = (0,0,0)
+                    print("[ERROR] too many rounds")
                     return sched_output
                 
-                if self.last_waiting_len == len(session_id_block) + len(session_id_arrived) and not sched_output.is_empty():
+                if self.last_waiting_len == (len(session_id_block), len(session_id_arrived), len(self.running)) and not sched_output.is_empty():
+                    print("[ERROR] Checked too often...")
                     return sched_output
                 
                 succ = self.dynamic_forced_evict(session_id_block, session_id_arrived, budget, sched_output.is_empty())
                 if not succ:
-                    self.last_waiting_len = len(session_id_block) + len(session_id_arrived)
+                    self.last_waiting_len = (len(session_id_block), len(session_id_arrived), len(self.running))
                     if sched_output.is_empty():
-                        print("[ERROR] dead lock...")
+                        print("[ERROR] dead lock...", num_round)
                         exit(-1)
+                    print("[ERROR] failed to allocate more")
                     return sched_output
+                self.last_waiting_len = (0,0,0)
             else:
+                # print("[ERROR] no need to allocate more", bool(self.waiting), current_rm_len==0, budget.can_schedule(num_new_seqs=1, num_new_tokens=1), break_signal==1)
                 return sched_output
         
         return sched_output
@@ -1411,7 +1433,7 @@ class Scheduler:
                         assert len(seq_group._finished_seq) == 1
                         seq = seq_group._finished_seq[0]
                         if seq.n_blocks > 0: #if not, it has already been freed.
-                            session_id_block[session_id] = seq.seq_id
+                            session_id_block[session_id] = seq
                     else:
                         for seq in seq_group.get_seqs():
                             self.free_seq(seq)
@@ -1510,6 +1532,7 @@ class Scheduler:
         for seq in seqs:
             seq.status = SequenceStatus.WAITING
             self.free_seq(seq)
+            seq.finished_removed = 0
             seq.reset_state_for_recompute()
 
     def _preempt_by_swap(
@@ -1576,7 +1599,7 @@ class Scheduler:
 
     def _get_num_new_tokens(self, seq_group: SequenceGroup,
                             status: SequenceStatus, enable_chunking: bool,
-                            budget: SchedulingBudget) -> int:
+                            budget: SchedulingBudget, first_time_prefill: bool = False) -> int:
         """Get the next new tokens to compute for a given sequence group
             that's in a given `status`.
 
@@ -1591,13 +1614,19 @@ class Scheduler:
         seqs = seq_group.get_seqs(status=status)
         for seq in seqs:
             num_new_tokens += seq.get_num_new_tokens()
+        offset = 0
+        if first_time_prefill and seq_group.computed_block_nums:
+            offset = len(seq_group.computed_block_nums) * self.cache_config.block_size * len(seqs)
+            num_new_tokens -= offset
         assert num_new_tokens > 0
+
         # Chunk if a running request cannot fit in.
         # If number of seq > 1, it means it is doing beam search in a
         # decode phase. Do not chunk in that case.
         # Chunk if a running request cannot fit in the given budget.
         # If number of seq > 1, it means it is doing beam search
         # in a decode phase. Do not chunk.
+
         if enable_chunking and len(seqs) == 1:
             remaining_token_budget = budget.remaining_token_budget()
             if self.cache_config.enable_prefix_caching or seq_group.session_reuse > 0:
@@ -1612,10 +1641,15 @@ class Scheduler:
                                      "(chunk size) must be dividable by "
                                      "block size, but got chunk_size "
                                      f"({budget.token_budget}) % block_size "
-                                     f"({block_size}) = {reminder}")
+                                     f"({block_size}) = {reminder}")                
                 if remaining_token_budget < num_new_tokens:
                     num_new_tokens = (remaining_token_budget //
                                       block_size) * block_size
             else:
                 num_new_tokens = min(num_new_tokens, remaining_token_budget)
+            
+            num_new_tokens = min(num_new_tokens, self.scheduler_config.max_one_shot_tokens)
+
+        if first_time_prefill:
+            return num_new_tokens, offset
         return num_new_tokens

@@ -280,6 +280,7 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             return [None]
 
         # output is List[SamplerOutput]
+        
         return output
 
     def _execute_model_spmd(

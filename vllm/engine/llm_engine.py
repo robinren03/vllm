@@ -371,9 +371,10 @@ class LLMEngine:
 
     def remove_dead_session(self, session_id_block:Dict[str,int], current_time: float):
         keys = list(session_id_block.keys()).copy()
+        import time
         for session_id in keys:
             session_config = self.session_configs.get(session_id, SessionConfig(0, 0, 0, 3, current_time - 3 ,0))
-            if current_time > session_config.prev_time + 120:
+            if current_time > session_config.prev_time + 60:
                 self.free_session(session_id)
 
     def get_session_block_rank(self, session_id: str, current_time: float) -> int:
@@ -384,10 +385,12 @@ class LLMEngine:
         # 计算rank的逻辑
         if current_time - prev_time <= tau:
             rank = prev_time + tau
-        elif current_time - prev_time <= 5 * tau:
-            rank = current_time + prev_time + tau
+        elif current_time - prev_time <= 2 * tau:
+            rank = prev_time + 2 * tau
+        elif current_time - prev_time <= 3 * tau:
+            rank = prev_time + 3 * tau
         else:
-            rank = current_time * 4 - prev_time
+            rank = prev_time * 2
 
         return rank
 
@@ -417,14 +420,13 @@ class LLMEngine:
         """Free the session's resources."""
         for scheduler, session_block_id, session_id_arrived in zip(self.scheduler, self.session_id_blocks, self.session_id_arrived):
             if session_id in session_block_id:
-                scheduler.free_seq_id(session_block_id[session_id])
-                del session_block_id[session_id]
+                scheduler.free_seq(session_block_id.pop(session_id))
             
             if session_id in session_id_arrived:
-                scheduler.free_seq_id(session_id_arrived[session_id])
-                del session_id_arrived[session_id]
+                scheduler.free_seq(session_id_arrived.pop(session_id))
+
         if session_id in self.session_configs:
-            del self.session_configs[session_id]
+            self.session_configs.pop(session_id)
 
     @classmethod
     def _get_executor_cls(cls,
@@ -637,8 +639,8 @@ class LLMEngine:
                         seq_group.computed_block_seq = session_id_block.pop(session_id)
                         self.session_id_arrived[preferred_scheduler] = {session_id:seq_group.computed_block_seq, **self.session_id_arrived[preferred_scheduler]}
                     else:
-                        self.scheduler[idx].free_seq_id(session_id_block[session_id])
-                        del session_id_block[session_id]
+                        self.scheduler[idx].free_seq(session_id_block[session_id])
+                        session_id_block.pop(session_id)
                     break
         
         min_cost_scheduler = self.scheduler[preferred_scheduler]
@@ -999,7 +1001,7 @@ class LLMEngine:
         if (current_time - self.last_arragement) > 1:
             self.remove_dead_session(self.session_id_blocks[0], current_time)
             self.session_id_blocks[0] = dict(sorted(self.session_id_blocks[0].items(), 
-                            key=lambda item: self.get_session_block_rank(item[0], current_time)), reverse=True)
+                            key=lambda item: self.get_session_block_rank(item[0], current_time), reverse=True))
             self.last_arragement = current_time
 
         seq_group_metadata_list, scheduler_outputs = self.scheduler[
