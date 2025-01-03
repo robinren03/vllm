@@ -17,5 +17,8 @@ def create_output_by_sequence_group(
     for step in outputs:
         for i, sequence_group_output in enumerate(step):
             output_by_sequence_group[i].append(sequence_group_output)
+        if len(step) == 1:
+            for i in range(1, num_seq_groups):
+                output_by_sequence_group[i].append(output_by_sequence_group[0][-1])
 
     return output_by_sequence_group

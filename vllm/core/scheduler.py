@@ -325,7 +325,7 @@ class Scheduler:
         # Finished sequence but their sequence group has not finished
         self._finished_queue: Deque[Sequence] = deque()
 
-        self.decode_prefill_ratio = 62.5 # avg_{wall}_time_to_decode_one_{request} / avg_{real}_time_to_prefill_one_{block}
+        self.decode_prefill_ratio = 100 # avg_{wall}_time_to_decode_one_{request} / avg_{real}_time_to_prefill_one_{block}
         # TODO(yanyu): Remind to write a profiler for decode_prefill_ratio
 
         # The following field is test-only. It is used to inject artificial
@@ -631,10 +631,9 @@ class Scheduler:
             evictable_items[idx] = [(session_id, seq), saved_len, saved_len * (idx + 1)]
 
         waiting = self.waiting
-        decode_prefill_ratio = self.decode_prefill_ratio * ( 5 - 4*len(self.running)/budget.max_num_seqs)
+        decode_prefill_ratio = self.decode_prefill_ratio * budget.max_num_seqs / (len(self.running) + 0.01)
 
         if len(waiting) == 0:
-            print("[EVICTION DECIDING] No waiting session")
             return False
         
         search_space = max(1, min(int(budget.max_num_seqs), int(len(waiting))))
@@ -653,7 +652,7 @@ class Scheduler:
                 break
             slots_required += self._get_seq_group_required_blocks(seqs)
             val -= decode_prefill_ratio * (len(evictable_items) - idx + 1)
-            decode_prefill_ratio = self.decode_prefill_ratio * ( 5 - 4 * (idx + len(self.running)) / budget.max_num_seqs)
+            decode_prefill_ratio = self.decode_prefill_ratio * budget.max_num_seqs / (idx + len(self.running))
             if (released_size < slots_required):
                 val, evict_items, released_size = min_vi(evictable_items, slots_required)
                 if val == -1:
@@ -1260,8 +1259,8 @@ class Scheduler:
                         len(running_scheduled.swapped_out)),
             )
 
-            # if (break_signal == 2): print("Budget", budget.num_batched_tokens, budget.num_curr_seqs)
-            # elif (break_signal == 1): print("Allocation", len(self.waiting), budget.can_schedule(num_new_seqs=1, num_new_tokens=1)
+            if (break_signal == 2): print("Budget", budget.num_batched_tokens, budget.num_curr_seqs)
+            elif (break_signal == 1): print("Allocation", len(self.waiting), budget.can_schedule(num_new_seqs=1, num_new_tokens=1))
             
             if len(self.waiting) > 0 and current_rm_len==0 and\
                 budget.can_schedule(num_new_seqs=1, num_new_tokens=1) and break_signal == 1:
@@ -1648,7 +1647,6 @@ class Scheduler:
             else:
                 num_new_tokens = min(num_new_tokens, remaining_token_budget)
             
-            num_new_tokens = min(num_new_tokens, self.scheduler_config.max_one_shot_tokens)
 
         if first_time_prefill:
             return num_new_tokens, offset
