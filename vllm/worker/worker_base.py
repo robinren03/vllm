@@ -160,6 +160,40 @@ class WorkerInput:
 
         return tensor_dict
 
+@dataclasses.dataclass(frozen=True)
+class FixInput:
+    """Local inputs to the Fixinput. May contain device-specific data. These
+    fields should be broadcastable to other workers.
+    """
+
+    positions: Optional[torch.Tensor] = None
+    slot_mapping: Optional[torch.Tensor] = None
+
+    @classmethod
+    def from_broadcasted_tensor_dict(
+        cls: Type["FixInput"],
+        tensor_dict: Dict[str, Any],
+    ) -> "FixInput":
+        """
+        Pop fields from the given tensor_dict and populate a new instance of
+        WorkerInput.
+        """
+        return cls(
+            positions=tensor_dict.pop("fix_positions"),
+            slot_mapping=tensor_dict.pop("fix_slot_mapping"),
+        )
+
+    def as_broadcastable_tensor_dict(
+            self) -> Dict[str, Union[int, torch.Tensor]]:
+        """
+        Extract broadcastable fields.
+        """
+        tensor_dict = {
+            "fix_positions": self.positions,
+            "fix_slot_mapping": self.slot_mapping,
+        }
+
+        return tensor_dict
 
 class LocalOrDistributedWorkerBase(WorkerBase):
     """
@@ -232,15 +266,25 @@ class LocalOrDistributedWorkerBase(WorkerBase):
 
             worker_input: WorkerInput = self.prepare_worker_input(
                 execute_model_req=execute_model_req)
-            model_input: ModelRunnerInputBase = (
+            
+            results = (
                 self.model_runner.prepare_model_input(
                     execute_model_req.seq_group_metadata_list,
                     execute_model_req.virtual_engine,
                     execute_model_req.finished_requests_ids))
+            if len(results) == 2:
+                model_input:ModelRunnerInputBase = results[0]
+                fix_input:FixInput = results[1]
+            else:
+                model_input:ModelRunnerInputBase = results
+                fix_input = None
+
             num_steps = execute_model_req.num_steps
 
             if self.do_metadata_broadcast:
                 broadcast_data = worker_input.as_broadcastable_tensor_dict()
+                broadcast_data.update(
+                    model_input.as_broadcastable_tensor_dict())
                 broadcast_data.update(
                     model_input.as_broadcastable_tensor_dict())
                 broadcast_data["num_steps"] = num_steps
@@ -254,12 +298,18 @@ class LocalOrDistributedWorkerBase(WorkerBase):
             num_steps = broadcast_data.pop("num_steps")
             worker_input = WorkerInput.from_broadcasted_tensor_dict(
                 broadcast_data)
+            fix_input = FixInput.from_broadcasted_tensor_dict(
+                broadcast_data)
             model_input = (
                 self.model_runner.
                 make_model_input_from_broadcasted_tensor_dict(broadcast_data))
 
         self.execute_worker(worker_input)
-
+        
+        # TODO(yanyu): add how to handle the forward_fix
+        if fix_input and fix_input.positions and self.kv_cache:
+            self.model_runner.execute_fix(fix_input, self.kv_cache[worker_input.virtual_engine])
+        
         # If there is no input, we don't need to execute the model.
         if worker_input.num_seq_groups == 0:
             return []

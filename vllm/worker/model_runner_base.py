@@ -176,3 +176,15 @@ class ModelRunnerBase(ABC, Generic[T]):
         Execute the model on the given input.
         """
         raise NotImplementedError
+
+    from vllm.worker.worker_base import FixInput
+    @current_platform.inference_mode()
+    def execute_fix(
+        self,
+        fix_input: FixInput,
+        kv_caches: List[torch.Tensor]
+    ) -> None:
+        """
+        Execute the fix on the given input.
+        """
+        raise NotImplementedError

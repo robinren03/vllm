@@ -297,6 +297,18 @@ class LlamaModel(nn.Module):
     def get_input_embeddings(self, input_ids: torch.Tensor) -> torch.Tensor:
         return self.embed_tokens(input_ids)
 
+    def forward_fix(
+        self,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        slot_mapping: torch.Tensor
+    ) -> None:
+        for i in range(self.start_layer, self.end_layer):
+            layer:LlamaDecoderLayer = self.layers[i]
+            layer.self_attn.rotary_emb.forward_fix(positions, kv_caches[i - self.start_layer][0], 
+                                                   slot_mapping.flatten(), "auto")
+        
+    
     def forward(
         self,
         input_ids: Optional[torch.Tensor],
@@ -425,6 +437,14 @@ class LlamaForCausalLM(nn.Module, SupportsLoRA):
                                   input_embeds)
         return model_output
 
+    def forward_fix(
+        self,
+        positions: torch.Tensor,
+        kv_caches: List[torch.Tensor],
+        slot_mapping: torch.Tensor
+    ) -> None:
+        self.model.forward_fix(positions, kv_caches, slot_mapping)
+    
     def compute_logits(self, hidden_states: torch.Tensor,
                        sampling_metadata: SamplingMetadata) -> torch.Tensor:
         logits = self.logits_processor(self.lm_head, hidden_states,

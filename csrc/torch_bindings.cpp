@@ -89,6 +89,12 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
       "float epsilon) -> ()");
   ops.impl("fused_add_rms_norm", torch::kCUDA, &fused_add_rms_norm);
 
+  //Modify rotary embedding
+  ops.def(
+      "modify_rotary_embedding(Tensor positions, Tensor key,"
+      "int head_size, Tensor cos_sin_cache, Tensor slot_mapping, str kv_cache_dtype) -> ()");
+  ops.impl("modify_rotary_embedding", torch::kCUDA, &modify_rotary_embedding);
+  
   // Rotary embedding
   // Apply GPT-NeoX or GPT-J style rotary embedding to query and key.
   ops.def(

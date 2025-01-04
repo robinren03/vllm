@@ -39,7 +39,7 @@ def sum_sps(configs:List[SessionConfig], model_max_len: int, current_time:float,
 
         new_pair = (tp, round(sum([sp_at_time(config, model_max_len, tp) for config in configs]), 3))
         if abs(prev_pair[1] - ahead_pair[1]) + abs(ahead_pair[1] - new_pair[1]) < 128: 
-            # TODO (yanyu): 128 = block_size * 8, and 8 is a magic number
+            # TODO(yanyu): 128 = block_size * 8, and 8 is a magic number
             time_val[-1] = new_pair
             prev_pair = new_pair 
         else:

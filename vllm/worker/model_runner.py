@@ -12,6 +12,8 @@ import torch
 import torch.distributed
 import torch.nn as nn
 
+from vllm.worker.worker_base import FixInput
+
 try:
     from flashinfer import BatchDecodeWithPagedKVCacheWrapper
     from flashinfer.decode import CUDAGraphBatchDecodeWithPagedKVCacheWrapper
@@ -185,7 +187,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             seq_ids: List[int],
             is_prompt: bool,
             block_tables: Optional[Dict[int, List[int]]],
-            computed_block_nums: List[int],
             n_seqs: int = 0,
 
             # Input tokens and positions.
@@ -224,10 +225,11 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             self.seq_ids = seq_ids
             self.is_prompt = is_prompt
             self.block_tables = block_tables
-            self.computed_block_nums = computed_block_nums
             self.n_seqs = n_seqs
             self.input_tokens = input_tokens or []
             self.input_positions = input_positions or []
+            self.fix_positions:List[int] = []
+            self.fix_token_pos:List[int] = []
             self.seq_lens = seq_lens or []
             self.orig_seq_lens = orig_seq_lens or []
             self.query_lens = query_lens or []
@@ -357,7 +359,10 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         If hit, update input tokens and positions to only compute the
         remaining blocks.
         """
-        computed_block_nums = inter_data.computed_block_nums
+        computed_block_nums = seq_group_metadata.computed_block_nums
+        reuse_blocks = seq_group_metadata.reuse_blocks
+        relocate_blocks = seq_group_metadata.relocate_blocks
+
 
         # Note that prefix caching does not support sliding window.
         # if (inter_data.is_prompt):
@@ -373,6 +378,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             return
         
         assert computed_block_nums is not None
+        assert reuse_blocks + relocate_blocks == len(computed_block_nums)
         # The cache hit prompt tokens in this sequence. Note that
         # this may be larger than the sequence length if chunked
         # prefill is enabled.
@@ -383,32 +389,46 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         # When chunked prefill is enabled, this is the token number of
         # computed chunks + current chunk.
         seq_len = inter_data.seq_lens[seq_idx]
+
+        
         if prefix_cache_len <= context_len:
             # We already passed the cache hit region,
             # so do normal computation.
             pass
-        elif context_len < prefix_cache_len < seq_len:
-            # Partial hit. Compute the missing part.
-            uncomputed_start = prefix_cache_len - context_len
-            inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
-                seq_idx][uncomputed_start:]
-            inter_data.input_positions[seq_idx] = inter_data.input_positions[
-                seq_idx][uncomputed_start:]
-            context_len = prefix_cache_len
-            inter_data.context_lens[seq_idx] = context_len
-            inter_data.query_lens[
-                seq_idx] = inter_data.seq_lens[seq_idx] - context_len
-        elif seq_len <= prefix_cache_len:
-            # Full hit. Only compute the last token to avoid
-            # erroneous behavior. FIXME: Ideally we should directly
-            # mark all tokens as computed in the scheduler and do not
-            # schedule this sequence, so this case should not happen.
-            inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
-                seq_idx][-1:]
-            inter_data.input_positions[seq_idx] = inter_data.input_positions[
-                seq_idx][-1:]
-            inter_data.query_lens[seq_idx] = 1
-            inter_data.context_lens[seq_idx] = inter_data.seq_lens[seq_idx] - 1
+        else:
+            reuse_tokens_ed = reuse_blocks * self.block_size + seq_group_metadata.head_offset + 1
+            relocate_tokens_st = (reuse_blocks + 1) * self.block_size + seq_group_metadata.tail_offset
+            delta = seq_group_metadata.delta
+            for i in range(max(context_len, reuse_tokens_ed), min(relocate_tokens_st, seq_len)):
+                inter_data.fix_positions[seq_idx].append(0)
+                inter_data.fix_token_pos[seq_idx].append(i)
+
+            for i in range(max(context_len, relocate_tokens_st), min(prefix_cache_len, seq_len)):
+                inter_data.fix_positions[seq_idx].append(delta)
+                inter_data.fix_token_pos[seq_idx].append(i)
+
+            if context_len < prefix_cache_len < seq_len:
+                # Partial hit. Compute the missing part.
+                uncomputed_start = prefix_cache_len - context_len
+                inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
+                    seq_idx][uncomputed_start:]
+                inter_data.input_positions[seq_idx] = inter_data.input_positions[
+                    seq_idx][uncomputed_start:]
+                context_len = prefix_cache_len
+                inter_data.context_lens[seq_idx] = context_len
+                inter_data.query_lens[
+                    seq_idx] = inter_data.seq_lens[seq_idx] - context_len
+            elif seq_len <= prefix_cache_len:
+                # Full hit. Only compute the last token to avoid
+                # erroneous behavior. FIXME: Ideally we should directly
+                # mark all tokens as computed in the scheduler and do not
+                # schedule this sequence, so this case should not happen.
+                inter_data.input_tokens[seq_idx] = inter_data.input_tokens[
+                    seq_idx][-1:]
+                inter_data.input_positions[seq_idx] = inter_data.input_positions[
+                    seq_idx][-1:]
+                inter_data.query_lens[seq_idx] = 1
+                inter_data.context_lens[seq_idx] = inter_data.seq_lens[seq_idx] - 1
 
             
 
@@ -512,7 +532,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             seq_ids=seq_ids,
             is_prompt=is_prompt,
             block_tables=seq_group_metadata.block_tables,
-            computed_block_nums=seq_group_metadata.computed_block_nums)
+            computed_block_nums=seq_group_metadata.computed_block_nums
+            )
         self.inter_data_list.append(inter_data)
 
         for seq_idx in range(n_seqs):
@@ -527,7 +548,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                 and batch_size <= _BATCH_SIZES_TO_CAPTURE[-1]
                 and max_decode_seq_len <= self.runner.max_seq_len_to_capture)
 
-    def build(self) -> ModelInputForGPU:
+    def build(self) -> Tuple[ModelInputForGPU, FixInput]:
         """Finalize the builder intermediate data and
         create on-device tensors.
         """
@@ -544,6 +565,17 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             flatten_2d_lists(inter_data.input_positions)
             for inter_data in self.inter_data_list
         ])
+
+        fix_positions = flatten_2d_lists([
+            flatten_2d_lists(inter_data.fix_positions) 
+            for inter_data in self.inter_data_list
+        ])
+
+        fix_positions_tensors = torch.tensor(fix_positions,
+                                           dtype=torch.long,
+                                           device=self.runner.device)
+        fix_slot_mapping = self.attn_metadata_builder.build_fix()
+        
         seq_lens = []
         max_decode_seq_len = 0
         for inter_data in self.inter_data_list:
@@ -652,7 +684,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             request_ids_to_seq_ids=request_ids_to_seq_ids,
             finished_requests_ids=self.finished_requests_ids,
             prompt_adapter_mapping=prompt_adapter_mapping,
-            prompt_adapter_requests=prompt_adapter_requests)
+            prompt_adapter_requests=prompt_adapter_requests),  FixInput(positions=fix_positions_tensors, slot_mapping=fix_slot_mapping)
 
 
 class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
@@ -1304,6 +1336,14 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
                                    sampling_metadata=sampling_metadata,
                                    is_prompt=is_prompt,
                                    virtual_engine=virtual_engine)
+    
+    @torch.inference_mode()
+    def execute_fix(
+        self,
+        fix_input: FixInput,
+        kv_caches: List[torch.Tensor]
+    ) -> None:
+        self.model.forward_fix(fix_input.positions, kv_caches, fix_input.slot_mapping)
 
     @torch.inference_mode()
     def execute_model(

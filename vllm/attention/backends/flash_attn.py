@@ -270,7 +270,25 @@ class FlashAttentionMetadataBuilder(
             compute_slot_mapping(is_profile_run, self.slot_mapping, seq_id,
                                  seq_len, context_len, start_idx,
                                  self.block_size, inter_data.block_tables)
+            
+    def build_fix(self) -> torch.Tensor:
+        device = self.runner.device
+        slot_mapping:List[int] = []
+        block_size = self.block_size
 
+        for inter_data in self.input_builder.inter_data_list:
+            for (seq_id, token_pos) in zip(inter_data.seq_ids, inter_data.fix_token_pos):
+                block_table = inter_data.block_tables[seq_id]
+                block_number = block_table[token_pos // block_size]
+                block_offset = token_pos % block_size
+                slot = block_number * block_size + block_offset
+                slot_mapping.append(slot)
+
+        slot_mapping_tensor = torch.tensor(slot_mapping,
+                                           dtype=torch.long,
+                                           device=device)
+        return slot_mapping_tensor
+        
     def build(self, seq_lens: List[int], query_lens: List[int],
               cuda_graph_pad_size: int, batch_size: int):
         """Build attention metadata with on-device tensors.

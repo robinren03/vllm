@@ -34,6 +34,43 @@ inline __device__ void apply_token_rotary_embedding(
 }
 
 template <typename scalar_t, bool IS_NEOX>
+inline __device__ void apply_modify_rotary_embedding(
+    scalar_t* __restrict__ key_cache,   // [num_blocks, block_size, num_heads,
+                                      // head_size]
+    const scalar_t* cache_ptr, const int head_size,
+    const int num_kv_heads, const int rot_dim, const int token_idx, 
+    const int block_stride, const int block_size, const int64_t slot_idx, const int64_t pos
+) {
+  const int embed_dim = rot_dim / 2;
+  const scalar_t* cos_ptr = cache_ptr;
+  const scalar_t* sin_ptr = cache_ptr + embed_dim;
+
+  const int64_t block_idx = slot_idx / block_size;
+  const int64_t block_offset = slot_idx % block_size;
+
+  const int nk = num_kv_heads * embed_dim;
+  for (int i = threadIdx.x; i < nk; i += blockDim.x) {
+    const int head_idx = i / embed_dim;
+    const int rot_offset = i % embed_dim;
+    const int64_t tgt_key_head = block_idx * block_stride +
+                                block_offset * num_heads * head_size +
+                                head_idx * head_size;
+        
+    scalar_t cos, sin;
+    int x_index, y_index;
+    x_index = 2 * rot_offset;
+    y_index = 2 * rot_offset + 1;
+    cos = VLLM_LDG(cos_ptr + x_index / 2);
+    sin = VLLM_LDG(sin_ptr + x_index / 2);
+    const scalar_t x = key_cache[tgt_key_head + x_index];
+    const scalar_t y = key_cache[tgt_key_head + y_index];
+    key_cache[tgt_key_head + x_index] = (x * cos + y * sin) * (pos >= 0);
+    key_cache[tgt_key_head + y_index] = (y * cos - x * sin) * (pos >= 0);
+  }
+}
+
+
+template <typename scalar_t, bool IS_NEOX>
 inline __device__ void apply_rotary_embedding(
     scalar_t* __restrict__ query,  // [batch_size, seq_len, num_heads,
                                    // head_size] or [num_tokens, num_heads,
@@ -92,6 +129,28 @@ __global__ void rotary_embedding_kernel(
 }
 
 template <typename scalar_t, bool IS_NEOX>
+__global__ void modify_rotary_embedding_kernel(
+    const int64_t* __restrict__ positions,  // [batch_size, seq_len] or
+                                            // [num_tokens]
+    scalar_t* __restrict__ key_cache,  // [num_blocks, block_size, num_heads,
+                                      // head_size]
+    const scalar_t* __restrict__ cos_sin_cache,  // [max_position, 2, rot_dim //
+                                                 // 2]
+    const int64_t* __restrict__ slot_mapping,  // [num_tokens]
+    const int rot_dim, const int block_stride, const int block_size,
+    const int num_kv_heads, const int head_size) {
+  // Each thread block is responsible for one token.
+  const int token_idx = blockIdx.x;
+  int64_t pos = positions[token_idx];
+  const int64_t slot_idx = slot_mapping[token_idx];
+  const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
+
+  apply_modify_rotary_embedding<scalar_t, IS_NEOX>(
+      key_cache, cache_ptr, head_size, num_kv_heads, rot_dim,
+      token_idx, block_stride, block_size, slot_idx, pos);
+}
+
+template <typename scalar_t, bool IS_NEOX>
 __global__ void batched_rotary_embedding_kernel(
     const int64_t* __restrict__ positions,  // [batch_size, seq_len] or
                                             // [num_tokens]
@@ -120,6 +179,37 @@ __global__ void batched_rotary_embedding_kernel(
 }
 
 }  // namespace vllm
+
+void modify_rotary_embedding(
+    torch::Tensor& positions,  //  [num_tokens]
+    torch::Tensor& key_cache,    // [num_blocks, block_size, num_heads, head_size]
+    int64_t head_size,
+    torch::Tensor& cos_sin_cache, // [max_position, rot_dim]
+    torch::Tensor& slot_mapping,  // [num_tokens]
+    const std::string& key_cache_dtype
+) {
+  int64_t num_tokens = slot_mapping.size(0);
+  int rot_dim = cos_sin_cache.size(1);
+  int num_kv_heads = key_cache.size(2);
+  int block_stride = key.stride(0);
+  int block_size = key_cache.size(1);
+
+  dim3 grid(num_tokens);
+  dim3 block(std::min<int64_t>(num_kv_heads * rot_dim / 2, 512));
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
+  const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+  
+  //currently only support Fp8KVCacheDataType::kAuto
+  assert(key_cache_dtype == "auto");
+  VLLM_DISPATCH_FLOATING_TYPES(key_cache.dtype(), "rotary_embedding", [&] {
+      vllm::modify_rotary_embedding_kernel<scalar_t, false>
+          <<<grid, block, 0, stream>>>(
+              positions.data_ptr<int64_t>(),
+              key_cache.data_ptr<scalar_t>(), cos_sin_cache.data_ptr<scalar_t>(),
+              slot_mapping.data_ptr<int64_t>(), rot_dim, block_stride, 
+              block_size, num_kv_heads, head_size);
+  });
+}
 
 void rotary_embedding(
     torch::Tensor& positions,  // [batch_size, seq_len] or [num_tokens]

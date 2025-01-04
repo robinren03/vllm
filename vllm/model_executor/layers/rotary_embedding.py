@@ -198,6 +198,19 @@ class RotaryEmbedding(CustomOp):
         key = torch.cat((key_rot, key_pass), dim=-1).reshape(key_shape)
         return query, key
 
+    def forward_fix(
+        self,
+        positions: torch.Tensor,
+        key_cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+        kv_cache_dtype: str
+    ) -> None:
+        from vllm import _custom_ops as ops
+        self.cos_sin_cache = self.cos_sin_cache.to(positions.device,
+                                                    dtype=key_cache.dtype)
+        ops.modify_rotary_embedding(positions, key_cache, self.head_size,
+                                    self.cos_sin_cache, slot_mapping, kv_cache_dtype)
+    
     def forward_cuda(
         self,
         positions: torch.Tensor,

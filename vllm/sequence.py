@@ -762,6 +762,11 @@ class SequenceGroupMetadata:
         token_chunk_size: Optional[int] = None,
         lora_request: Optional[LoRARequest] = None,
         computed_block_nums: Optional[List[int]] = None,
+        reuse_blocks: Optional[int] = 0,
+        relocate_blocks: Optional[int] = 0,
+        head_offset: Optional[int] = 0,
+        tail_offset: Optional[int] = 0,
+        delta: Optional[int] = 0,
         state: Optional[SequenceGroupState] = None,
         multi_modal_data: Optional["MultiModalDataDict"] = None,
         encoder_seq_data: Optional[SequenceData] = None,
@@ -778,6 +783,11 @@ class SequenceGroupMetadata:
         self.lora_request = lora_request
         self.prompt_adapter_request = prompt_adapter_request
         self.computed_block_nums = computed_block_nums
+        self.reuse_blocks = reuse_blocks
+        self.relocate_blocks = relocate_blocks
+        self.head_offset = head_offset
+        self.tail_offset = tail_offset
+        self.delta = delta
         self.multi_modal_data = multi_modal_data
         self.state = SequenceGroupState() if state is None else state
         self.encoder_seq_data = encoder_seq_data

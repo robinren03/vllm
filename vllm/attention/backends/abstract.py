@@ -136,6 +136,10 @@ class AttentionMetadataBuilder(ABC, Generic[T]):
         """Build attention metadata with on-device tensors."""
         raise NotImplementedError
 
+    def build_fix(self) -> torch.Tensor:
+        """Build attention metadata with fixed tensors."""
+        raise NotImplementedError
+
 
 class AttentionImpl(ABC, Generic[T]):
 
