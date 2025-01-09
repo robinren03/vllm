@@ -331,7 +331,7 @@ class _AsyncLLMEngine(LLMEngine):
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str]=None,
-        session_reuse: Optional[int]=-1,
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]]=-1,
         rounds: Optional[float] = -1,
         default_config: Optional[AgentConfig] = None
     ) -> None:
@@ -698,7 +698,7 @@ class AsyncLLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1,
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1,
         rounds: Optional[float] = -1,
         default_config: Optional[AgentConfig] = None
     ) -> AsyncStream:
@@ -740,7 +740,7 @@ class AsyncLLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1,
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1,
         rounds: Optional[float] = -1,
         default_config: Optional[AgentConfig] = None
     ) -> AsyncIterator[RequestOutput]:
@@ -915,7 +915,7 @@ class AsyncLLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1,
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1,
         rounds: Optional[float] = -1,
         default_config: Optional[AgentConfig] = None
     ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:

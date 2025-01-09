@@ -37,6 +37,8 @@ template <typename scalar_t, bool IS_NEOX>
 inline __device__ void apply_modify_rotary_embedding(
     scalar_t* __restrict__ key_cache,   // [num_blocks, block_size, num_heads,
                                       // head_size]
+    scalar_t* __restrict__ value_cache, // [num_blocks, block_size, num_heads,
+                                        // head_size]
     const scalar_t* cache_ptr, const int head_size,
     const int num_kv_heads, const int rot_dim, const int token_idx, 
     const int block_stride, const int block_size, const int64_t slot_idx, const int64_t pos
@@ -53,7 +55,7 @@ inline __device__ void apply_modify_rotary_embedding(
     const int head_idx = i / embed_dim;
     const int rot_offset = i % embed_dim;
     const int64_t tgt_key_head = block_idx * block_stride +
-                                block_offset * num_heads * head_size +
+                                block_offset * num_kv_heads * head_size +
                                 head_idx * head_size;
         
     scalar_t cos, sin;
@@ -66,6 +68,8 @@ inline __device__ void apply_modify_rotary_embedding(
     const scalar_t y = key_cache[tgt_key_head + y_index];
     key_cache[tgt_key_head + x_index] = (x * cos + y * sin) * (pos >= 0);
     key_cache[tgt_key_head + y_index] = (y * cos - x * sin) * (pos >= 0);
+    value_cache[tgt_key_head + x_index] *=  (pos >= 0);
+    value_cache[tgt_key_head + y_index] *=  (pos >= 0);
   }
 }
 
@@ -134,6 +138,8 @@ __global__ void modify_rotary_embedding_kernel(
                                             // [num_tokens]
     scalar_t* __restrict__ key_cache,  // [num_blocks, block_size, num_heads,
                                       // head_size]
+    scalar_t* __restrict__ value_cache,  // [num_blocks, block_size, num_heads,
+                                        // head_size]
     const scalar_t* __restrict__ cos_sin_cache,  // [max_position, 2, rot_dim //
                                                  // 2]
     const int64_t* __restrict__ slot_mapping,  // [num_tokens]
@@ -146,8 +152,8 @@ __global__ void modify_rotary_embedding_kernel(
   const scalar_t* cache_ptr = cos_sin_cache + pos * rot_dim;
 
   apply_modify_rotary_embedding<scalar_t, IS_NEOX>(
-      key_cache, cache_ptr, head_size, num_kv_heads, rot_dim,
-      token_idx, block_stride, block_size, slot_idx, pos);
+      key_cache, value_cache, cache_ptr, head_size, num_kv_heads, 
+      rot_dim, token_idx, block_stride, block_size, slot_idx, pos);
 }
 
 template <typename scalar_t, bool IS_NEOX>
@@ -183,6 +189,7 @@ __global__ void batched_rotary_embedding_kernel(
 void modify_rotary_embedding(
     torch::Tensor& positions,  //  [num_tokens]
     torch::Tensor& key_cache,    // [num_blocks, block_size, num_heads, head_size]
+    torch::Tensor& value_cache,  // [num_blocks, block_size, num_heads, head_size]
     int64_t head_size,
     torch::Tensor& cos_sin_cache, // [max_position, rot_dim]
     torch::Tensor& slot_mapping,  // [num_tokens]
@@ -191,21 +198,22 @@ void modify_rotary_embedding(
   int64_t num_tokens = slot_mapping.size(0);
   int rot_dim = cos_sin_cache.size(1);
   int num_kv_heads = key_cache.size(2);
-  int block_stride = key.stride(0);
+  int block_stride = key_cache.stride(0);
   int block_size = key_cache.size(1);
 
   dim3 grid(num_tokens);
   dim3 block(std::min<int64_t>(num_kv_heads * rot_dim / 2, 512));
-  const at::cuda::OptionalCUDAGuard device_guard(device_of(key));
+  const at::cuda::OptionalCUDAGuard device_guard(device_of(key_cache));
   const cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   
   //currently only support Fp8KVCacheDataType::kAuto
   assert(key_cache_dtype == "auto");
-  VLLM_DISPATCH_FLOATING_TYPES(key_cache.dtype(), "rotary_embedding", [&] {
+  VLLM_DISPATCH_FLOATING_TYPES(key_cache.scalar_type(), "rotary_embedding", [&] {
       vllm::modify_rotary_embedding_kernel<scalar_t, false>
           <<<grid, block, 0, stream>>>(
               positions.data_ptr<int64_t>(),
-              key_cache.data_ptr<scalar_t>(), cos_sin_cache.data_ptr<scalar_t>(),
+              key_cache.data_ptr<scalar_t>(), value_cache.data_ptr<scalar_t>(),
+              cos_sin_cache.data_ptr<scalar_t>(),
               slot_mapping.data_ptr<int64_t>(), rot_dim, block_stride, 
               block_size, num_kv_heads, head_size);
   });

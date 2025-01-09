@@ -305,7 +305,7 @@ class LlamaModel(nn.Module):
     ) -> None:
         for i in range(self.start_layer, self.end_layer):
             layer:LlamaDecoderLayer = self.layers[i]
-            layer.self_attn.rotary_emb.forward_fix(positions, kv_caches[i - self.start_layer][0], 
+            layer.self_attn.rotary_emb.forward_fix(positions, kv_caches[i - self.start_layer], 
                                                    slot_mapping.flatten(), "auto")
         
     

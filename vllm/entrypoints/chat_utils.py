@@ -205,3 +205,14 @@ def find_kth_subseq_position(input_seq, subseq, k):
                 return start_idx 
     
     return -1
+
+def find_all_subseq_position(input_seq, subseq):  
+    input_list = input_seq 
+    subseq_list = subseq
+    len_subseq = len(subseq_list)  
+    pos = []
+    for start_idx in range(len(input_list) - len_subseq + 1):   
+        if input_list[start_idx:start_idx+len_subseq] == subseq_list:  
+            pos.append(start_idx)
+    
+    return pos

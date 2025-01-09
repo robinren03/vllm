@@ -91,7 +91,7 @@ TORCH_LIBRARY_EXPAND(TORCH_EXTENSION_NAME, ops) {
 
   //Modify rotary embedding
   ops.def(
-      "modify_rotary_embedding(Tensor positions, Tensor key,"
+      "modify_rotary_embedding(Tensor positions, Tensor key, Tensor value,"
       "int head_size, Tensor cos_sin_cache, Tensor slot_mapping, str kv_cache_dtype) -> ()");
   ops.impl("modify_rotary_embedding", torch::kCUDA, &modify_rotary_embedding);
   

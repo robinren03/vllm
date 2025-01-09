@@ -3,7 +3,7 @@ import math
 from abc import ABC, abstractmethod
 from itertools import count, takewhile
 from os.path import commonprefix
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from typing import Sequence as GenericSequence
 from typing import Set, Tuple
 
@@ -306,7 +306,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
     def _allocate_sequence(self, \
                            seq: Sequence, \
                            computed_block_seq: Sequence, \
-                           session_reuse: int, \
+                           session_reuse: Union[int, Tuple[int,int,int]], \
                            ref_count: int, \
                            is_encoder_decoder: bool = True) -> Tuple[BlockTable, int]:
         # Allocate new physical token blocks that will store the prompt tokens.
@@ -321,16 +321,69 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
         if (session_reuse == -1): session_reuse = 0
         
-        computed_len = min(len(block_table), session_reuse // self.block_size)
+        last_reuse = len(block_table)
+        if computed_block_seq:
+            old_pad_st = computed_block_seq.data.first_pad
+            old_pad_num = computed_block_seq.data.num_pad
+        else:
+            old_pad_st = -1
+            old_pad_num = 0
+        
+        def recover_pad(old_pad_st, old_pad_num, pos):
+            return pos if pos < old_pad_st else pos + old_pad_num
+        
+        if isinstance(session_reuse, int):
+            session_reuse = recover_pad(old_pad_st, old_pad_num, session_reuse)
+            computed_len = last_reuse = max(0, min(last_reuse, session_reuse // self.block_size))
+            delta = 0
+            if (last_reuse * self.block_size >= old_pad_st):
+                first_pad = old_pad_st
+                num_pad = min(old_pad_num, last_reuse * self.block_size - old_pad_st)
+            else:
+                first_pad = -1
+                num_pad = 0
+        else:
+            new_pad_st = session_reuse[0]
+            new_pad_en = recover_pad(old_pad_st, old_pad_num, session_reuse[1])
+            new_last_reuse = recover_pad(old_pad_st, old_pad_num, session_reuse[2])
+            if (old_pad_st > 0 and old_pad_st != new_pad_st):
+                last_reuse = computed_len = max(0, min(last_reuse, (old_pad_st-1) // self.block_size, (new_pad_st-1) // self.block_size))
+                delta = 0
+                first_pad = -1
+                num_pad = 0
+            else:
+                last_reuse = max(0, min(last_reuse, new_last_reuse // self.block_size))
+                if (last_reuse * self.block_size <= new_pad_en):
+                    computed_len = max(0, min(last_reuse, (new_pad_st - 1) // self.block_size))
+                    delta = 0
+                    first_pad = -1
+                    num_pad = 0
+                else:
+                    pad_st = new_pad_st
+                    import math
+                    head_block = pad_st // self.block_size
+                    evict_block = math.ceil(pad_st / self.block_size)
+                    head_offset = pad_st % self.block_size
+                    tail_block = new_pad_en // self.block_size
+                    tail_offset = new_pad_en % self.block_size
+                    delta = new_pad_en - max(0, (old_pad_st + old_pad_num))
+                    first_pad = new_pad_st
+                    if (tail_block == head_block):
+                        computed_len = last_reuse
+                        num_pad = tail_offset - head_offset 
+                    else:
+                        computed_len = last_reuse - (tail_block - evict_block)
+                        num_pad = self.block_size - head_offset + tail_offset
+                        for i in range(evict_block, tail_block):
+                            self.gpu_allocator.free(block_table[i])
+                        block_table = block_table[:evict_block] + block_table[tail_block:]
+                    
+        seq.data.set_pad(first_pad, num_pad)
         for i in range(computed_len, len(block_table)):
             self.gpu_allocator.free(block_table[i])
         block_table = block_table[:computed_len]
-        
-        if (computed_len > seq.n_blocks):
-            for i in range(seq.n_blocks, computed_len):
-                self.gpu_allocator.free(block_table[i])
-            computed_len = seq.n_blocks
-            block_table = block_table[:computed_len]
+
+        assert computed_len <= seq.n_blocks
         
         for block in block_table:
             block.ref_count += ref_count - 1
@@ -352,7 +405,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 block.ref_count = ref_count
             block_table.append(block)
 
-        return block_table, computed_len
+        return block_table, computed_len, delta
 
     def allocate(self, seq_group: SequenceGroup) -> None:
         is_encoder_decoder = seq_group.is_encoder_decoder()
@@ -374,7 +427,10 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         
         block_table: BlockTable = result[0]
         computed_len: int = result[1]
-        
+        seq_group.delta = result[2]
+        print("delta", seq_group.delta)
+        seq_group.first_pad = seq.data.first_pad
+        seq_group.num_pad = seq.data.num_pad
         seq_group.computed_block_nums =[block.block_number for block in block_table[:computed_len]]
         # Assign the self-attention block tables for each sequence.
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):

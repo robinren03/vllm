@@ -1,7 +1,7 @@
 import dataclasses
 from abc import ABC, abstractmethod
 from typing import (TYPE_CHECKING, Any, Dict, Generic, List, Optional, Type,
-                    TypeVar)
+                    TypeVar, Union)
 
 import torch
 
@@ -128,7 +128,41 @@ class ModelRunnerInputBuilderBase(ABC, Generic[T]):
         """Build metadata with on-device tensors."""
         raise NotImplementedError
 
+@dataclasses.dataclass(frozen=True)
+class FixInput:
+    """Local inputs to the Fixinput. May contain device-specific data. These
+    fields should be broadcastable to other workers.
+    """
 
+    positions: Optional[torch.Tensor] = None
+    slot_mapping: Optional[torch.Tensor] = None
+
+    @classmethod
+    def from_broadcasted_tensor_dict(
+        cls: Type["FixInput"],
+        tensor_dict: Dict[str, Any],
+    ) -> "FixInput":
+        """
+        Pop fields from the given tensor_dict and populate a new instance of
+        WorkerInput.
+        """
+        return cls(
+            positions=tensor_dict.pop("fix_positions"),
+            slot_mapping=tensor_dict.pop("fix_slot_mapping"),
+        )
+
+    def as_broadcastable_tensor_dict(
+            self) -> Dict[str, Union[int, torch.Tensor]]:
+        """
+        Extract broadcastable fields.
+        """
+        tensor_dict = {
+            "fix_positions": self.positions,
+            "fix_slot_mapping": self.slot_mapping,
+        }
+
+        return tensor_dict
+    
 class ModelRunnerBase(ABC, Generic[T]):
     """
     Model runner interface that abstracts a particular hardware and/or type of
@@ -177,7 +211,6 @@ class ModelRunnerBase(ABC, Generic[T]):
         """
         raise NotImplementedError
 
-    from vllm.worker.worker_base import FixInput
     @current_platform.inference_mode()
     def execute_fix(
         self,

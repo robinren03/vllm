@@ -1,3 +1,5 @@
+from typing import Union, Tuple
+
 class SessionConfig:
     def __init__(self, ip: int, p: float, sum_p:int, tau: float, current_time: float, rounds: float):
         self.ip = ip if ip>0 else sum_p
@@ -8,7 +10,7 @@ class SessionConfig:
         self.t0 = current_time
         self.rounds = rounds if rounds > 0 else 15
     
-    def update(self, sum_p: int, current_time:float, session_reuse: int, rounds: float = -1):
+    def update(self, sum_p: int, current_time:float, session_reuse: Union[int, Tuple[int, int, int]], rounds: float = -1):
         prev_p = self.prev_p
         delta_p = sum_p - prev_p
         tau = current_time - self.prev_time
@@ -16,7 +18,7 @@ class SessionConfig:
             # restoration happens, go back
             self.ip = prev_p
             self.t0 = current_time
-        elif session_reuse > 2:
+        elif (isinstance(session_reuse,int) and session_reuse > 2) or (isinstance(session_reuse, tuple) and session_reuse[0] + session_reuse[1] <=0 and session_reuse[2] > 2):
             self.p = (self.p * 2 + delta_p) / 3
         
         self.tau = (tau + self.tau * 2 ) / 3

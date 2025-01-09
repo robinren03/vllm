@@ -158,10 +158,22 @@ class SequenceData:
         self._stage: SequenceStage = SequenceStage.PREFILL
 
         self._update_cached_all_tokens()
+        self.first_pad = -1
+        self.num_pad = 0
 
     def _update_cached_all_tokens(self):
         self._cached_all_token_ids: List[int] = list(self._prompt_token_ids +
                                                      self._output_token_ids)
+
+    def set_pad(self, first_pad:int, num_pad:int):
+        if (first_pad == -1):
+            return
+        self.first_pad = first_pad
+        self.num_pad = num_pad
+        prompt_token_ids = self._prompt_token_ids
+        self._prompt_token_ids = prompt_token_ids[:first_pad] + array('l', [-1]*num_pad) + prompt_token_ids[first_pad:]
+        self._prompt_token_ids_tuple = tuple(self._prompt_token_ids)
+        self._update_cached_all_tokens()
 
     @property
     def prompt_token_ids(self) -> Tuple[int, ...]:
@@ -482,7 +494,7 @@ class SequenceGroup:
         seqs: List[Sequence],
         arrival_time: float,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1,
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1,
         sampling_params: Optional[SamplingParams] = None,
         lora_request: Optional[LoRARequest] = None,
         embeddings: Optional[List[float]] = None,
@@ -515,6 +527,9 @@ class SequenceGroup:
         self._finished_seq: List[Sequence] = []
         self.computed_block_seq = computed_block_seq
         self.computed_block_nums: List[int] = None
+        self.delta = 0
+        self.first_pad = -1
+        self.num_pad = 0
 
     @property
     def prompt(self) -> Optional[str]:
@@ -762,8 +777,8 @@ class SequenceGroupMetadata:
         token_chunk_size: Optional[int] = None,
         lora_request: Optional[LoRARequest] = None,
         computed_block_nums: Optional[List[int]] = None,
-        reuse_blocks: Optional[int] = 0,
-        relocate_blocks: Optional[int] = 0,
+        first_pad: Optional[int] = -1,
+        num_pad: Optional[int] = 0,
         head_offset: Optional[int] = 0,
         tail_offset: Optional[int] = 0,
         delta: Optional[int] = 0,
@@ -783,8 +798,8 @@ class SequenceGroupMetadata:
         self.lora_request = lora_request
         self.prompt_adapter_request = prompt_adapter_request
         self.computed_block_nums = computed_block_nums
-        self.reuse_blocks = reuse_blocks
-        self.relocate_blocks = relocate_blocks
+        self.first_pad = first_pad
+        self.num_pad = num_pad
         self.head_offset = head_offset
         self.tail_offset = tail_offset
         self.delta = delta

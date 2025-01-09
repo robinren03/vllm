@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import (TYPE_CHECKING, Any, ClassVar, Dict, Iterable, List,
                     Mapping, Optional)
 from typing import Sequence as GenericSequence
-from typing import Set, Type, TypeVar, Union
+from typing import Set, Type, TypeVar, Union, Tuple
 
 from transformers import PreTrainedTokenizer
 
@@ -577,7 +577,7 @@ class LLMEngine:
         prompt_adapter_request: Optional[PromptAdapterRequest],
         trace_headers: Optional[Mapping[str, str]] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1,
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1,
         rounds: Optional[float] = -1,
         default_config: Optional[AgentConfig] = None
     ) -> None:
@@ -690,7 +690,7 @@ class LLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1,
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1,
         rounds: Optional[float] = -1,
         default_config: Optional[AgentConfig] = None
     ) -> None:
@@ -772,7 +772,7 @@ class LLMEngine:
         trace_headers: Optional[Mapping[str, str]] = None,
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: str = None,
-        session_reuse: int = -1
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1
     ) -> SequenceGroup:
         """Creates a SequenceGroup with SamplingParams."""
         max_logprobs = self.get_model_config().max_logprobs
@@ -814,7 +814,7 @@ class LLMEngine:
         lora_request: Optional[LoRARequest],
         prompt_adapter_request: Optional[PromptAdapterRequest],
         session_id: Optional[str] = None,
-        session_reuse: Optional[int] = -1
+        session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1
     ) -> SequenceGroup:
         """Creates a SequenceGroup with PoolingParams."""
         # Defensive copy of PoolingParams, which are used by the pooler

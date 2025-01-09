@@ -1,7 +1,7 @@
 # Adapted from
 # https://github.com/lm-sys/FastChat/blob/168ccc29d3f7edc50823016105c024fe2282732a/fastchat/protocol/openai_api_protocol.py
 import time
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union, Tuple
 
 import torch
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -124,7 +124,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     user: Optional[str] = None
 
     session_id: Optional[str] = None
-    session_reuse: Optional[int] = -1
+    session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1
 
     default_config: Optional[AgentConfig] = AgentConfig(ip=-1, p=100, tau=2)
     rounds: Optional[float] = -1

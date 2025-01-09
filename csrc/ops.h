@@ -31,7 +31,7 @@ void fused_add_rms_norm(torch::Tensor& input, torch::Tensor& residual,
                         torch::Tensor& weight, double epsilon);
 
 void modify_rotary_embedding(
-    torch::Tensor& positions, torch::Tensor& key_cache,
+    torch::Tensor& positions, torch::Tensor& key_cache, torch::Tensor& value_cache,
     int64_t head_size, torch::Tensor& cos_sin_cache, torch::Tensor& slot_mapping,
     const std::string& key_cache_dtype); 
 

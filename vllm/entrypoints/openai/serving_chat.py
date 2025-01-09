@@ -12,7 +12,8 @@ from vllm.engine.async_llm_engine import AsyncLLMEngine
 from vllm.entrypoints.chat_utils import (ConversationMessage,
                                          load_chat_template,
                                          parse_chat_message_content,
-                                         find_kth_subseq_position)
+                                         find_kth_subseq_position, 
+                                         find_all_subseq_position)
 from vllm.entrypoints.logger import RequestLogger
 from vllm.entrypoints.openai.protocol import (
     ChatCompletionLogProb, ChatCompletionLogProbs,
@@ -62,7 +63,7 @@ class OpenAIServingChat(OpenAIServing):
                          return_tokens_as_token_ids=return_tokens_as_token_ids)
 
         self.response_role = response_role
-
+        self.session_id_2_pos = {}
         # If this is None we use the tokenizer's default chat template
         self.chat_template = load_chat_template(chat_template)
 
@@ -178,10 +179,25 @@ class OpenAIServingChat(OpenAIServing):
             engine_inputs: PromptInputs = {
                 "prompt_token_ids": prompt_inputs["prompt_token_ids"],
             }
+            print("Prompt token ids: ", prompt_inputs["prompt_token_ids"])
             
             if "Llama-3" in request.model:
-                session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse)
-
+                if (isinstance(session_reuse, int)):
+                    session_id_2_pos = self.session_id_2_pos.get(session_id, [])
+                    if (session_id_2_pos):
+                        session_reuse = self.session_id_2_pos[session_id][session_reuse] 
+                    else: session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse)
+                else:
+                    session_id_2_pos = self.session_id_2_pos.get(session_id, [])
+                    print(session_id_2_pos)
+                    if (session_id_2_pos):
+                        sr = session_reuse
+                        session_reuse = (session_id_2_pos[sr[0]], session_id_2_pos[sr[1]], session_id_2_pos[sr[2]])
+                    else:
+                        session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse[0])
+                
+                self.session_id_2_pos[session_id] = find_all_subseq_position(prompt_inputs["prompt_token_ids"], [128006])
+                print("Session reuse by token: ", session_reuse)
 
             if mm_data is not None:
                 engine_inputs["multi_modal_data"] = mm_data

@@ -277,12 +277,14 @@ class FlashAttentionMetadataBuilder(
         block_size = self.block_size
 
         for inter_data in self.input_builder.inter_data_list:
-            for (seq_id, token_pos) in zip(inter_data.seq_ids, inter_data.fix_token_pos):
-                block_table = inter_data.block_tables[seq_id]
-                block_number = block_table[token_pos // block_size]
-                block_offset = token_pos % block_size
-                slot = block_number * block_size + block_offset
-                slot_mapping.append(slot)
+            for (seq_id, token_poses) in zip(inter_data.seq_ids, inter_data.fix_token_pos):
+                if token_poses:
+                    block_table = inter_data.block_tables[seq_id]
+                    for token_pos in token_poses:
+                        block_number = block_table[token_pos // block_size]
+                        block_offset = token_pos % block_size
+                        slot = block_number * block_size + block_offset
+                        slot_mapping.append(slot)
 
         slot_mapping_tensor = torch.tensor(slot_mapping,
                                            dtype=torch.long,

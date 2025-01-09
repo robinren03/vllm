@@ -446,11 +446,11 @@ class Scheduler:
                 finished_queue.popleft()
             elif session_id_block:
                 seq = session_id_block.pop(list(session_id_block.keys())[0])
-                print("[EVICTION OPT] Evicting", seq.seq_id)
+                # print("[EVICTION OPT] Evicting", seq.seq_id)
                 self.free_seq(seq)
             elif session_id_arrived:
                 seq = session_id_arrived.pop(list(session_id_arrived.keys())[0])
-                print("[EVICTION OPT] Evicting", seq.seq_id)
+                # print("[EVICTION OPT] Evicting", seq.seq_id)
                 self.free_seq(seq)
             elif running_queue:
                 # Preempt the lowest-priority sequence groups.
@@ -1259,8 +1259,8 @@ class Scheduler:
                         len(running_scheduled.swapped_out)),
             )
 
-            if (break_signal == 2): print("Budget", budget.num_batched_tokens, budget.num_curr_seqs)
-            elif (break_signal == 1): print("Allocation", len(self.waiting), budget.can_schedule(num_new_seqs=1, num_new_tokens=1))
+            # if (break_signal == 2): print("Budget", budget.num_batched_tokens, budget.num_curr_seqs)
+            # elif (break_signal == 1): print("Allocation", len(self.waiting), budget.can_schedule(num_new_seqs=1, num_new_tokens=1))
             
             if len(self.waiting) > 0 and current_rm_len==0 and\
                 budget.can_schedule(num_new_seqs=1, num_new_tokens=1) and break_signal == 1:
@@ -1269,11 +1269,11 @@ class Scheduler:
 
                 if num_round >= 5:
                     self.last_waiting_len = (0,0,0)
-                    print("[ERROR] too many rounds")
+                    # print("[ERROR] too many rounds")
                     return sched_output
                 
                 if self.last_waiting_len == (len(session_id_block), len(session_id_arrived), len(self.running)) and not sched_output.is_empty():
-                    print("[ERROR] Checked too often...")
+                    # print("[ERROR] Checked too often...")
                     return sched_output
                 
                 succ = self.dynamic_forced_evict(session_id_block, session_id_arrived, budget, sched_output.is_empty())
@@ -1384,6 +1384,9 @@ class Scheduler:
                 lora_request=seq_group.lora_request,
                 computed_block_nums=common_computed_block_nums,
                 state=seq_group.state,
+                first_pad=seq_group.first_pad,
+                num_pad=seq_group.num_pad,
+                delta=seq_group.delta,
                 # `multi_modal_data` will only be present for the 1st comm
                 # between engine and worker.
                 # the subsequent comms can still use delta, but
@@ -1628,7 +1631,8 @@ class Scheduler:
 
         if enable_chunking and len(seqs) == 1:
             remaining_token_budget = budget.remaining_token_budget()
-            if self.cache_config.enable_prefix_caching or seq_group.session_reuse > 0:
+            session_reuse = seq_group.session_reuse
+            if (isinstance(session_reuse,int) and session_reuse > 0) or (isinstance(session_reuse, Tuple) and session_reuse[2] > 0):
                 # When prefix caching is enabled, we always allocate
                 # the number of new tokens that is dividable by the block size
                 # to avoid partial block matching.

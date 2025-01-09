@@ -12,7 +12,6 @@ import torch
 import torch.distributed
 import torch.nn as nn
 
-from vllm.worker.worker_base import FixInput
 
 try:
     from flashinfer import BatchDecodeWithPagedKVCacheWrapper
@@ -55,7 +54,7 @@ from vllm.utils import (CudaMemoryProfiler, flatten_2d_lists,
                         get_kv_cache_torch_dtype, is_hip,
                         is_pin_memory_available)
 from vllm.worker.model_runner_base import (
-    ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase,
+    ModelRunnerBase, ModelRunnerInputBase, ModelRunnerInputBuilderBase, FixInput,
     _add_attn_metadata_broadcastable_dict,
     _add_sampling_metadata_broadcastable_dict,
     _init_attn_metadata_from_tensor_dict,
@@ -256,6 +255,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
 
             self.input_tokens = [[] for _ in range(self.n_seqs)]
             self.input_positions = [[] for _ in range(self.n_seqs)]
+            self.fix_positions = [[] for _ in range(self.n_seqs)]
+            self.fix_token_pos = [[] for _ in range(self.n_seqs)]
             self.seq_lens = [0] * self.n_seqs
             self.orig_seq_lens = [0] * self.n_seqs
             self.query_lens = [0] * self.n_seqs
@@ -348,7 +349,15 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         inter_data.orig_seq_lens[seq_idx] = seq_len
         inter_data.context_lens[seq_idx] = context_len
         inter_data.input_tokens[seq_idx] = tokens
-        inter_data.input_positions[seq_idx] = list(range(context_len, seq_len))
+        num_pad = seq_data.num_pad
+        first_pad = seq_data.first_pad
+        end_pad = first_pad + num_pad
+        def ret_pos(s,e,p):
+            if p>=e: return p-e+s
+            elif p>=s: return -1
+            else: return p
+         
+        inter_data.input_positions[seq_idx] = [ret_pos(first_pad, end_pad, i) for i in range(context_len, seq_len)]
         inter_data.query_lens[
             seq_idx] = seq_len - context_len if inter_data.is_prompt else 1
 
@@ -360,8 +369,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         remaining blocks.
         """
         computed_block_nums = seq_group_metadata.computed_block_nums
-        reuse_blocks = seq_group_metadata.reuse_blocks
-        relocate_blocks = seq_group_metadata.relocate_blocks
 
 
         # Note that prefix caching does not support sliding window.
@@ -378,7 +385,6 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             return
         
         assert computed_block_nums is not None
-        assert reuse_blocks + relocate_blocks == len(computed_block_nums)
         # The cache hit prompt tokens in this sequence. Note that
         # this may be larger than the sequence length if chunked
         # prefill is enabled.
@@ -396,16 +402,18 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             # so do normal computation.
             pass
         else:
-            reuse_tokens_ed = reuse_blocks * self.block_size + seq_group_metadata.head_offset + 1
-            relocate_tokens_st = (reuse_blocks + 1) * self.block_size + seq_group_metadata.tail_offset
+            pad_token_st = seq_group_metadata.first_pad
+            pad_token_num = seq_group_metadata.num_pad
+            pad_token_en = pad_token_st + pad_token_num
             delta = seq_group_metadata.delta
-            for i in range(max(context_len, reuse_tokens_ed), min(relocate_tokens_st, seq_len)):
-                inter_data.fix_positions[seq_idx].append(0)
+            for i in range(max(context_len, pad_token_st), min(pad_token_en, seq_len)):
+                inter_data.fix_positions[seq_idx].append(-1)
                 inter_data.fix_token_pos[seq_idx].append(i)
-
-            for i in range(max(context_len, relocate_tokens_st), min(prefix_cache_len, seq_len)):
-                inter_data.fix_positions[seq_idx].append(delta)
-                inter_data.fix_token_pos[seq_idx].append(i)
+            
+            if (delta):
+                for i in range(max(context_len, pad_token_en), min(prefix_cache_len, seq_len)):
+                    inter_data.fix_positions[seq_idx].append(delta)
+                    inter_data.fix_token_pos[seq_idx].append(i)
 
             if context_len < prefix_cache_len < seq_len:
                 # Partial hit. Compute the missing part.
@@ -531,8 +539,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             request_id=seq_group_metadata.request_id,
             seq_ids=seq_ids,
             is_prompt=is_prompt,
-            block_tables=seq_group_metadata.block_tables,
-            computed_block_nums=seq_group_metadata.computed_block_nums
+            block_tables=seq_group_metadata.block_tables
             )
         self.inter_data_list.append(inter_data)
 
@@ -985,7 +992,7 @@ class GPUModelRunnerBase(ModelRunnerBase[TModelInputForGPU]):
         num_layers = self.model_config.get_num_layers(self.parallel_config)
         kv_caches = [None] * num_layers
         finished_requests_ids = [seq.request_id for seq in seqs]
-        model_input = self.prepare_model_input(
+        model_input, _ = self.prepare_model_input(
             seqs, finished_requests_ids=finished_requests_ids)
         intermediate_tensors = None
         if not get_pp_group().is_first_rank:
@@ -1309,7 +1316,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         seq_group_metadata_list: List[SequenceGroupMetadata],
         virtual_engine: int = 0,
         finished_requests_ids: Optional[List[str]] = None
-    ) -> ModelInputForGPUWithSamplingMetadata:
+    ) -> Tuple[ModelInputForGPUWithSamplingMetadata, FixInput]:
         """Prepare the model input based on a given sequence group, including
         metadata for the sampling step.
 
@@ -1323,7 +1330,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
 
         If cuda graph is required, this API automatically pads inputs.
         """
-        model_input = self._prepare_model_input_tensors(
+        model_input, fix_input = self._prepare_model_input_tensors(
             seq_group_metadata_list, finished_requests_ids)
         sampling_metadata = SamplingMetadata.prepare(seq_group_metadata_list,
                                                      model_input.seq_lens,
@@ -1335,7 +1342,7 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         return dataclasses.replace(model_input,
                                    sampling_metadata=sampling_metadata,
                                    is_prompt=is_prompt,
-                                   virtual_engine=virtual_engine)
+                                   virtual_engine=virtual_engine), fix_input
     
     @torch.inference_mode()
     def execute_fix(

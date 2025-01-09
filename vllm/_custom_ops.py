@@ -146,12 +146,14 @@ def rotary_embedding(
 
 def modify_rotary_embedding(
     positions: torch.Tensor,
-    key: torch.Tensor,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor,
     head_size: int,
     cos_sin_cache: torch.Tensor,
     slot_mapping: torch.Tensor,
     kv_cache_dtype: str) -> None:
-    torch.ops._C.modify_rotary_embedding(positions, key, head_size, cos_sin_cache, slot_mapping, kv_cache_dtype)
+    torch.ops._C.modify_rotary_embedding(positions, key_cache, value_cache, 
+                                         head_size, cos_sin_cache, slot_mapping, kv_cache_dtype)
 
 def batched_rotary_embedding(positions: torch.Tensor, query: torch.Tensor,
                              key: torch.Tensor, head_size: int,
