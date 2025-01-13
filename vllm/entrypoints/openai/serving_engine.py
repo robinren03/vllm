@@ -156,6 +156,8 @@ class OpenAIServing:
         self,
         request: AnyRequest,
     ) -> Optional[ErrorResponse]:
+        # WARNING(yanyu): Remove the model check here
+        return None
         if request.model in self.served_model_names:
             return None
         if request.model in [lora.lora_name for lora in self.lora_requests]:
@@ -174,6 +176,7 @@ class OpenAIServing:
         self, request: AnyRequest
     ) -> Union[Tuple[None, None], Tuple[LoRARequest, None], Tuple[
             None, PromptAdapterRequest]]:
+        return None, None
         if request.model in self.served_model_names:
             return None, None
         for lora in self.lora_requests:

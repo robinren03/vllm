@@ -175,6 +175,16 @@ class SequenceData:
         self._prompt_token_ids_tuple = tuple(self._prompt_token_ids)
         self._update_cached_all_tokens()
 
+    def remove_pad(self):
+        if (self.first_pad == -1):
+            return
+        prompt_token_ids = self._prompt_token_ids
+        self._prompt_token_ids = prompt_token_ids[:self.first_pad] + prompt_token_ids[self.first_pad + self.num_pad:]
+        self._prompt_token_ids_tuple = tuple(self._prompt_token_ids)
+        self._update_cached_all_tokens()
+        self.first_pad = -1
+        self.num_pad = 0
+
     @property
     def prompt_token_ids(self) -> Tuple[int, ...]:
         return self._prompt_token_ids_tuple
@@ -380,6 +390,7 @@ class Sequence:
     def reset_state_for_recompute(self):
         """Reset the sequence states for recomputation."""
         self.data.reset_state_for_recompute()
+        self.data.remove_pad()
 
     def append_token_id(
         self,
@@ -623,9 +634,6 @@ class SequenceGroup:
         if (self.metrics.first_token_time is None
                 and self.get_seqs()[0].get_output_len() == 1):
             self.metrics.first_token_time = time
-            # print("TTFT Time: ", time - self.metrics.arrival_time)
-            # if time - self.metrics.arrival_time < 0.1:
-            #     print("First token time is too close to arrival time")
 
     def maybe_set_first_scheduled_time(self, time: float) -> None:
         """Sets the first scheduled time and time in queue for Request

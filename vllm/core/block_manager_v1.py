@@ -321,7 +321,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
         if (session_reuse == -1): session_reuse = 0
         
-        last_reuse = len(block_table)
+        origin_reuse = last_reuse = len(block_table)
         if computed_block_seq:
             old_pad_st = computed_block_seq.data.first_pad
             old_pad_num = computed_block_seq.data.num_pad
@@ -333,6 +333,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             return pos if pos < old_pad_st else pos + old_pad_num
         
         if isinstance(session_reuse, int):
+            print("Allocate using old session reuse", session_reuse)
             session_reuse = recover_pad(old_pad_st, old_pad_num, session_reuse)
             computed_len = last_reuse = max(0, min(last_reuse, session_reuse // self.block_size))
             delta = 0
@@ -343,6 +344,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 first_pad = -1
                 num_pad = 0
         else:
+            print("Allocate using new session reuse")
             new_pad_st = session_reuse[0]
             new_pad_en = recover_pad(old_pad_st, old_pad_num, session_reuse[1])
             new_last_reuse = recover_pad(old_pad_st, old_pad_num, session_reuse[2])
@@ -379,11 +381,13 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                         block_table = block_table[:evict_block] + block_table[tail_block:]
                     
         seq.data.set_pad(first_pad, num_pad)
+        computed_len = min(computed_len, seq.n_blocks)
+
         for i in range(computed_len, len(block_table)):
             self.gpu_allocator.free(block_table[i])
         block_table = block_table[:computed_len]
 
-        assert computed_len <= seq.n_blocks
+        assert computed_len <= seq.n_blocks, f"{computed_len} > {seq.n_blocks} with len of {origin_reuse} and a triplet of {session_reuse}"
         
         for block in block_table:
             block.ref_count += ref_count - 1
@@ -428,7 +432,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         block_table: BlockTable = result[0]
         computed_len: int = result[1]
         seq_group.delta = result[2]
-        print("delta", seq_group.delta)
         seq_group.first_pad = seq.data.first_pad
         seq_group.num_pad = seq.data.num_pad
         seq_group.computed_block_nums =[block.block_number for block in block_table[:computed_len]]
@@ -717,7 +720,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
     def free(self, seq: Sequence) -> None:
         if seq.seq_id not in self.block_tables:
             # Already freed or haven't been scheduled yet.
-            print("Failed to free seq_id", seq.seq_id)
             return
         block_table = self.block_tables[seq.seq_id]
         self._free_block_table(block_table)
@@ -726,7 +728,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
     def free_seq_id(self, seq_id: int) -> None:
         if seq_id not in self.block_tables:
             # Already freed or haven't been scheduled yet.
-            print("Failed to free seq_id", seq_id)
             return
         block_table = self.block_tables[seq_id]
         self._free_block_table(block_table)

@@ -179,7 +179,6 @@ class OpenAIServingChat(OpenAIServing):
             engine_inputs: PromptInputs = {
                 "prompt_token_ids": prompt_inputs["prompt_token_ids"],
             }
-            print("Prompt token ids: ", prompt_inputs["prompt_token_ids"])
             
             if "Llama-3" in request.model:
                 if (isinstance(session_reuse, int)):
@@ -189,7 +188,6 @@ class OpenAIServingChat(OpenAIServing):
                     else: session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse)
                 else:
                     session_id_2_pos = self.session_id_2_pos.get(session_id, [])
-                    print(session_id_2_pos)
                     if (session_id_2_pos):
                         sr = session_reuse
                         session_reuse = (session_id_2_pos[sr[0]], session_id_2_pos[sr[1]], session_id_2_pos[sr[2]])
@@ -197,7 +195,7 @@ class OpenAIServingChat(OpenAIServing):
                         session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse[0])
                 
                 self.session_id_2_pos[session_id] = find_all_subseq_position(prompt_inputs["prompt_token_ids"], [128006])
-                print("Session reuse by token: ", session_reuse)
+                self.session_id_2_pos[session_id].append(2**30) # add an extra large number as the doorman
 
             if mm_data is not None:
                 engine_inputs["multi_modal_data"] = mm_data

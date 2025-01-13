@@ -139,8 +139,8 @@ class RequestTracker:
         if (stream := self._request_streams.get(request_id)) is not None:
             stream.put(request_output)
         if request_output.finished:
-            # if verbose:
-            #     logger.info("Finished request %s.", request_id)
+            if verbose:
+                logger.info("Finished request %s.", request_id)
             self.abort_request(request_id, is_exception = False)
 
     def process_exception(self,
@@ -172,8 +172,8 @@ class RequestTracker:
 
         self.new_requests_event.set()
 
-        # if verbose:
-        #     logger.info("Added request %s.", request_id)
+        if verbose:
+            logger.info("Added request %s.", request_id)
 
         return stream
 

@@ -446,11 +446,9 @@ class Scheduler:
                 finished_queue.popleft()
             elif session_id_block:
                 seq = session_id_block.pop(list(session_id_block.keys())[0])
-                # print("[EVICTION OPT] Evicting", seq.seq_id)
                 self.free_seq(seq)
             elif session_id_arrived:
                 seq = session_id_arrived.pop(list(session_id_arrived.keys())[0])
-                # print("[EVICTION OPT] Evicting", seq.seq_id)
                 self.free_seq(seq)
             elif running_queue:
                 # Preempt the lowest-priority sequence groups.
@@ -619,9 +617,6 @@ class Scheduler:
         if (not session_id_block) and (not session_id_arrived):
             return False
 
-        # print("[Session id blocks]", session_id_block.keys())
-        # print("[Session id arrived]", session_id_arrived.keys())
-
         evictable_items = list(session_id_block.items()) if session_id_block else []
         if session_id_arrived:
             evictable_items.extend(list(session_id_arrived.items()))
@@ -658,7 +653,6 @@ class Scheduler:
                 if val == -1:
                     break
             val += decode_prefill_ratio * (len(evictable_items) - idx)
-            # print("[EVICTION DECIDING]", val, best_val, released_size, slots_required)
             if val < best_val:
                 best_val = val
                 best_evict = evict_items.copy()
@@ -1261,7 +1255,39 @@ class Scheduler:
 
             # if (break_signal == 2): print("Budget", budget.num_batched_tokens, budget.num_curr_seqs)
             # elif (break_signal == 1): print("Allocation", len(self.waiting), budget.can_schedule(num_new_seqs=1, num_new_tokens=1))
+            # TODO (yanyu): Check where leak the memory
+            # block_in_seqs = 0
+            # seq_seqs = []
+            # for seq_group in self.running:
+            #     seq = seq_group.get_seqs()[0]
+            #     block_in_seqs += seq.n_blocks
+            #     seq_seqs.append((seq.seq_id, seq.n_blocks))
             
+            # for seq in session_id_arrived.values():
+            #     block_in_seqs += seq.n_blocks
+            #     seq_seqs.append((seq.seq_id, seq.n_blocks))
+            
+            # for seq in session_id_block.values():
+            #     block_in_seqs += seq.n_blocks
+            #     seq_seqs.append((seq.seq_id, seq.n_blocks))
+            
+            # block_in_bts = 0
+            # seq_bts = []
+            # for seq_id, block_table in self.block_manager.block_tables.items():
+            #     block_in_bts += len(block_table)
+            #     seq_bts.append((seq_id, len(block_table)))
+            
+            # print("[INFO] Block in seqs", seq_seqs)
+            # print("[INFO] Block in bts", seq_bts)
+            
+            # block_vis = self.block_manager.num_total_gpu_blocks - \
+            #     self.block_manager.get_num_free_gpu_blocks()
+            
+            # print("[ERROR] Block leak", block_in_seqs, block_in_bts, block_vis, self.block_manager.num_total_gpu_blocks)
+
+            # if block_in_seqs + 10 <= max(block_in_bts, block_vis):
+            #     exit(-1)
+
             if len(self.waiting) > 0 and current_rm_len==0 and\
                 budget.can_schedule(num_new_seqs=1, num_new_tokens=1) and break_signal == 1:
                 if not sched_output.is_empty():
@@ -1280,8 +1306,9 @@ class Scheduler:
                 if not succ:
                     self.last_waiting_len = (len(session_id_block), len(session_id_arrived), len(self.running))
                     if sched_output.is_empty():
-                        print("[ERROR] dead lock...", num_round)
-                        exit(-1)
+                        print("[ERROR] dead lock...", num_round, self.running)
+                        # exit(-1)
+                        assert False
                     print("[ERROR] failed to allocate more")
                     return sched_output
                 self.last_waiting_len = (0,0,0)
@@ -1530,6 +1557,8 @@ class Scheduler:
         seq_group.computed_block_seq = None
         seq_group.computed_block_nums = None
         seq_group.session_reuse = -1
+        seq_group.first_pad = -1
+        seq_group.num_pad = 0
         assert len(seqs) == 1
         for seq in seqs:
             seq.status = SequenceStatus.WAITING
