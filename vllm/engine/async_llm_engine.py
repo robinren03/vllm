@@ -497,6 +497,7 @@ class AsyncLLMEngine:
             start_engine_loop=start_engine_loop,
             usage_context=usage_context,
             stat_loggers=stat_loggers,
+            agent_prefix_dir=engine_args.agent_prefix_dir,
         )
         return engine
 

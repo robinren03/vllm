@@ -37,7 +37,10 @@ class BlockAllocatorBase(ABC):
     @abstractmethod
     def allocate(self,
                  block_hash: Optional[int] = None,
-                 num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
+                 num_hashed_tokens: int = 0, is_profile:bool = False) -> PhysicalTokenBlock:
+        pass
+    
+    def allocate_hash(self, block_hash: Optional[int] = None) -> PhysicalTokenBlock:
         pass
 
     @abstractmethod
@@ -102,7 +105,7 @@ class CachedBlockAllocator(BlockAllocatorBase):
 
     def allocate(self,
                  block_hash: Optional[int] = None,
-                 num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
+                 num_hashed_tokens: int = 0, is_profile:bool=False) -> PhysicalTokenBlock:
         if block_hash is None:
             block_hash = next(self.default_hash_ctr)
         if block_hash in self.evictor:
@@ -178,16 +181,30 @@ class UncachedBlockAllocator(BlockAllocatorBase):
                                        block_hash=-1,
                                        num_hashed_tokens=0)
             self.free_blocks.append(block)
+        
+        self.hashed_block = {}
 
     def allocate(self,
                  block_hash: Optional[int] = None,
-                 num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
+                 num_hashed_tokens: int = 0, is_profile: bool=False) -> PhysicalTokenBlock:
         if not self.free_blocks:
             raise ValueError("Out of memory! No free blocks are available.")
         block = self.free_blocks.pop()
-        block.ref_count = 1
-        return block
-
+        if (not is_profile or num_hashed_tokens < self.block_size):
+            block.ref_count = 1
+            return block
+        else:
+            block.ref_count = 1024
+            self.hashed_block[block_hash] = block
+            return block
+    
+    def allocate_hash(self, block_hash: Optional[int] = None) -> PhysicalTokenBlock:
+        if block_hash in self.hashed_block:
+            block = self.hashed_block[block_hash]
+            block.ref_count += 1
+            return block
+        return None
+    
     def free(self, block: PhysicalTokenBlock) -> None:
         if block.ref_count == 0:
             raise ValueError(f"Double free! {block} is already freed.")
@@ -302,13 +319,14 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             return AllocStatus.OK
         else:
             return AllocStatus.LATER
-
+    
     def _allocate_sequence(self, \
                            seq: Sequence, \
                            computed_block_seq: Sequence, \
                            session_reuse: Union[int, Tuple[int,int,int]], \
                            ref_count: int, \
-                           is_encoder_decoder: bool = True) -> Tuple[BlockTable, int]:
+                           is_encoder_decoder: bool = True, \
+                           is_profile:bool = False) -> Tuple[BlockTable, int]:
         # Allocate new physical token blocks that will store the prompt tokens.
         num_prompt_blocks = seq.n_blocks
         if computed_block_seq:
@@ -333,7 +351,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             return pos if pos < old_pad_st else pos + old_pad_num
         
         if isinstance(session_reuse, int):
-            print("Allocate using old session reuse", session_reuse)
             session_reuse = recover_pad(old_pad_st, old_pad_num, session_reuse)
             computed_len = last_reuse = max(0, min(last_reuse, session_reuse // self.block_size))
             delta = 0
@@ -344,7 +361,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 first_pad = -1
                 num_pad = 0
         else:
-            print("Allocate using new session reuse")
             new_pad_st = session_reuse[0]
             new_pad_en = recover_pad(old_pad_st, old_pad_num, session_reuse[1])
             new_last_reuse = recover_pad(old_pad_st, old_pad_num, session_reuse[2])
@@ -393,25 +409,33 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             block.ref_count += ref_count - 1
 
         num_prompt_blocks = seq.n_blocks - computed_len
-        for logical_idx in range(num_prompt_blocks):
-            if (self.block_sliding_window is not None
-                    and logical_idx >= self.block_sliding_window):
-                block = block_table[logical_idx % self.block_sliding_window]
+        if computed_len:
+            for logical_idx in range(num_prompt_blocks):
+                block = self.gpu_allocator.allocate(is_profile=is_profile)
                 # Set the reference counts of the token blocks.
                 block.ref_count = ref_count
-            elif not is_encoder_decoder and self.enable_caching:
-                block = self.gpu_allocator.allocate(
-                    seq.hash_of_block(logical_idx),
-                    seq.num_hashed_tokens_of_block(logical_idx))
-            else:
-                block = self.gpu_allocator.allocate()
-                # Set the reference counts of the token blocks.
-                block.ref_count = ref_count
-            block_table.append(block)
+                block_table.append(block)
 
-        return block_table, computed_len, delta
+            return block_table, computed_len, delta
+        else:
+            use_hash:bool = True
+            for logical_idx in range(num_prompt_blocks):
+                if use_hash:
+                    block=self.gpu_allocator.allocate_hash(
+                        seq.hash_of_block(logical_idx))
+                    if block:
+                        block_table.append(block)
+                        computed_len += 1
+                        continue
+                use_hash = False
+                if is_profile:
+                    block = self.gpu_allocator.allocate(seq.hash_of_block(logical_idx), seq.num_hashed_tokens_of_block(logical_idx), is_profile=is_profile)
+                else:
+                    block = self.gpu_allocator.allocate()
+                block_table.append(block)
+            return block_table, computed_len, delta
 
-    def allocate(self, seq_group: SequenceGroup) -> None:
+    def allocate(self, seq_group: SequenceGroup, is_profile:bool=False) -> None:
         is_encoder_decoder = seq_group.is_encoder_decoder()
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 
@@ -427,11 +451,14 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                                     computed_block_seq,
                                     seq_group.session_reuse,
                                     seq_group.num_seqs(),
-                                    is_encoder_decoder)
+                                    is_encoder_decoder,
+                                    is_profile=is_profile)
         
         block_table: BlockTable = result[0]
         computed_len: int = result[1]
         seq_group.delta = result[2]
+        print(f"Computed len: {computed_len}, delta: {seq_group.delta}")
+        
         seq_group.first_pad = seq.data.first_pad
         seq_group.num_pad = seq.data.num_pad
         seq_group.computed_block_nums =[block.block_number for block in block_table[:computed_len]]

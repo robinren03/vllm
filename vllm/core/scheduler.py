@@ -903,7 +903,7 @@ class Scheduler:
         budget: SchedulingBudget,
         curr_loras: Optional[Set[int]],
         enable_chunking: bool = False,
-        session_id_arrived: Dict[str, Sequence] = []
+        session_id_arrived: Dict[str, Sequence] = [],
     ) -> Tuple[deque, SchedulerPrefillOutputs]:
         """Schedule sequence groups that are in prefill stage.
 
@@ -1253,41 +1253,6 @@ class Scheduler:
                         len(running_scheduled.swapped_out)),
             )
 
-            # if (break_signal == 2): print("Budget", budget.num_batched_tokens, budget.num_curr_seqs)
-            # elif (break_signal == 1): print("Allocation", len(self.waiting), budget.can_schedule(num_new_seqs=1, num_new_tokens=1))
-            # TODO (yanyu): Check where leak the memory
-            # block_in_seqs = 0
-            # seq_seqs = []
-            # for seq_group in self.running:
-            #     seq = seq_group.get_seqs()[0]
-            #     block_in_seqs += seq.n_blocks
-            #     seq_seqs.append((seq.seq_id, seq.n_blocks))
-            
-            # for seq in session_id_arrived.values():
-            #     block_in_seqs += seq.n_blocks
-            #     seq_seqs.append((seq.seq_id, seq.n_blocks))
-            
-            # for seq in session_id_block.values():
-            #     block_in_seqs += seq.n_blocks
-            #     seq_seqs.append((seq.seq_id, seq.n_blocks))
-            
-            # block_in_bts = 0
-            # seq_bts = []
-            # for seq_id, block_table in self.block_manager.block_tables.items():
-            #     block_in_bts += len(block_table)
-            #     seq_bts.append((seq_id, len(block_table)))
-            
-            # print("[INFO] Block in seqs", seq_seqs)
-            # print("[INFO] Block in bts", seq_bts)
-            
-            # block_vis = self.block_manager.num_total_gpu_blocks - \
-            #     self.block_manager.get_num_free_gpu_blocks()
-            
-            # print("[ERROR] Block leak", block_in_seqs, block_in_bts, block_vis, self.block_manager.num_total_gpu_blocks)
-
-            # if block_in_seqs + 10 <= max(block_in_bts, block_vis):
-            #     exit(-1)
-
             if len(self.waiting) > 0 and current_rm_len==0 and\
                 budget.can_schedule(num_new_seqs=1, num_new_tokens=1) and break_signal == 1:
                 if not sched_output.is_empty():
@@ -1374,12 +1339,7 @@ class Scheduler:
                 block_tables[seq_id] = self.block_manager.get_block_table(seq)
                 self.block_manager.access_all_blocks_in_seq(seq, now)
 
-            if seq_group.computed_block_seq is None:
-                common_computed_block_nums = (
-                    self.block_manager.get_common_computed_block_ids(
-                        seq_group.get_seqs(status=SequenceStatus.RUNNING)))
-            else:
-                common_computed_block_nums = seq_group.computed_block_nums
+            common_computed_block_nums = seq_group.computed_block_nums
             
 
             do_sample = True
@@ -1477,7 +1437,7 @@ class Scheduler:
         return session_id_block
 
     def _allocate_and_set_running(self, seq_group: SequenceGroup) -> None:
-        self.block_manager.allocate(seq_group)
+        self.block_manager.allocate(seq_group, is_profile=seq_group.request_id.startswith("profile"))
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
             seq.status = SequenceStatus.RUNNING
 

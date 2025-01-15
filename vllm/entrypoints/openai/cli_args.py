@@ -89,6 +89,10 @@ def make_arg_parser(parser: FlexibleArgumentParser) -> FlexibleArgumentParser:
                         help="The file path to the chat template, "
                         "or the template in single-line form "
                         "for the specified model")
+    parser.add_argument("--agent-prefix-dir",
+                        type=nullable_str,
+                        default=None,
+                        help="The directory containing the agent prefix files")
     parser.add_argument("--response-role",
                         type=nullable_str,
                         default="assistant",

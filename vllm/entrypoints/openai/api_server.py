@@ -255,7 +255,6 @@ async def build_server(
         served_model_names = [args.model]
 
     global engine, engine_args
-
     engine_args = AsyncEngineArgs.from_cli_args(args)
     engine = (llm_engine
               if llm_engine is not None else AsyncLLMEngine.from_engine_args(

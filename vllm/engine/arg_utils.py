@@ -117,6 +117,7 @@ class EngineArgs:
     disable_logprobs_during_spec_decoding: Optional[bool] = None
 
     otlp_traces_endpoint: Optional[str] = None
+    agent_prefix_dir: Optional[str] = None
 
     def __post_init__(self):
         if self.tokenizer is None:

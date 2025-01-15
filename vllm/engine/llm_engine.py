@@ -25,7 +25,7 @@ from vllm.engine.output_processor.stop_checker import StopChecker
 from vllm.engine.output_processor.util import create_output_by_sequence_group
 from vllm.executor.executor_base import ExecutorBase
 from vllm.executor.ray_utils import initialize_ray_cluster
-from vllm.inputs import INPUT_REGISTRY, LLMInputs, PromptInputs
+from vllm.inputs import INPUT_REGISTRY, LLMInputs, PromptInputs, TokensPrompt
 from vllm.logger import init_logger
 from vllm.lora.request import LoRARequest
 from vllm.outputs import (EmbeddingRequestOutput, RequestOutput,
@@ -175,7 +175,8 @@ class LLMEngine:
         log_stats: bool,
         usage_context: UsageContext = UsageContext.ENGINE_CONTEXT,
         stat_loggers: Optional[Dict[str, StatLoggerBase]] = None,
-        time_lr: Optional[float] = 0.7
+        time_lr: Optional[float] = 0.7,
+        agent_prefix_dir: Optional[str] = None
     ) -> None:
         logger.info(
             "Initializing an LLM engine (v%s) with config: "
@@ -368,6 +369,17 @@ class LLMEngine:
                     self.get_tokenizer_for_seq,
                 ),
             ))
+        
+        import os
+        if agent_prefix_dir and os.path.exists(agent_prefix_dir):
+            import json
+            with open(agent_prefix_dir, "r") as f:
+                agent_prefix = json.load(f)
+            for idx, s in enumerate(agent_prefix):
+                self.add_request(f"profile-{idx}", TokensPrompt(prompt_token_ids=s), SamplingParams(max_tokens=1))
+            while self.has_unfinished_requests():
+                _ = self.step()
+            
 
     def remove_dead_session(self, session_id_block:Dict[str,int], current_time: float):
         keys = list(session_id_block.keys()).copy()
