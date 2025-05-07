@@ -66,10 +66,12 @@ inline __device__ void apply_modify_rotary_embedding(
     sin = VLLM_LDG(sin_ptr + x_index / 2);
     const scalar_t x = key_cache[tgt_key_head + x_index];
     const scalar_t y = key_cache[tgt_key_head + y_index];
-    key_cache[tgt_key_head + x_index] = (x * cos + y * sin) * (pos >= 0);
-    key_cache[tgt_key_head + y_index] = (y * cos - x * sin) * (pos >= 0);
-    value_cache[tgt_key_head + x_index] *=  (pos >= 0);
-    value_cache[tgt_key_head + y_index] *=  (pos >= 0);
+    key_cache[tgt_key_head + x_index] = (pos >= 0)? (x * cos + y * sin) : BFLOAT16_MINF;
+    key_cache[tgt_key_head + y_index] = (pos >= 0)? (y * cos - x * sin) : BFLOAT16_MINF;
+    const scalar_t x = key_cache[tgt_key_head + x_index];
+    const scalar_t y = key_cache[tgt_key_head + y_index];
+    value_cache[tgt_key_head + x_index] =  (pos >= 0)?(x) : BFLOAT16_MINF;
+    value_cache[tgt_key_head + y_index] =  (pos >= 0)?(y) : BFLOAT16_MINF;
   }
 }
 

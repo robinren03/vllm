@@ -188,12 +188,13 @@ class OpenAIServingChat(OpenAIServing):
                     else: session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse)
                 else:
                     session_id_2_pos = self.session_id_2_pos.get(session_id, [])
+                    print(session_reuse)
                     if (session_id_2_pos):
                         sr = session_reuse
                         session_reuse = (session_id_2_pos[sr[0]], session_id_2_pos[sr[1]], session_id_2_pos[sr[2]])
                     else:
                         session_reuse = find_kth_subseq_position(prompt_inputs["prompt_token_ids"], [128006], session_reuse[0])
-                
+                    print(session_reuse)
                 self.session_id_2_pos[session_id] = find_all_subseq_position(prompt_inputs["prompt_token_ids"], [128006])
                 self.session_id_2_pos[session_id].append(2**30) # add an extra large number as the doorman
 
@@ -218,7 +219,8 @@ class OpenAIServingChat(OpenAIServing):
                 session_id=session_id,
                 session_reuse = session_reuse,
                 rounds=request.rounds,
-                default_config=request.default_config
+                default_config=request.default_config,
+                arrival_time=request.arrival_time,
             )
         except ValueError as e:
             # TODO: Use a vllm-specific Validation Error

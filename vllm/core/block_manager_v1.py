@@ -382,20 +382,29 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                     head_block = pad_st // self.block_size
                     evict_block = math.ceil(pad_st / self.block_size)
                     head_offset = pad_st % self.block_size
+                    if head_offset == 0: head_offset = self.block_size
                     tail_block = new_pad_en // self.block_size
                     tail_offset = new_pad_en % self.block_size
-                    delta = new_pad_en - max(0, (old_pad_st + old_pad_num))
-                    first_pad = new_pad_st
-                    if (tail_block == head_block):
-                        computed_len = last_reuse
-                        num_pad = tail_offset - head_offset 
+                    if old_pad_st == -1:
+                        old_pad_st = new_pad_st
+                    delta = (tail_block - evict_block) * self.block_size
+                    if (delta >= 32):
+                        computed_len = max(0, min(last_reuse, (new_pad_st - 1) // self.block_size))
+                        delta = 0
+                        first_pad = -1
+                        num_pad = 0
                     else:
-                        computed_len = last_reuse - (tail_block - evict_block)
-                        num_pad = self.block_size - head_offset + tail_offset
-                        for i in range(evict_block, tail_block):
-                            self.gpu_allocator.free(block_table[i])
-                        block_table = block_table[:evict_block] + block_table[tail_block:]
-                    
+                        first_pad = new_pad_st
+                        if (tail_block == head_block):
+                            computed_len = last_reuse
+                            num_pad = tail_offset - head_offset 
+                        else:
+                            computed_len = last_reuse - (tail_block - evict_block)
+                            num_pad = self.block_size - head_offset + tail_offset
+                            for i in range(evict_block, tail_block):
+                                self.gpu_allocator.free(block_table[i])
+                            block_table = block_table[:evict_block] + block_table[tail_block:]
+        
         seq.data.set_pad(first_pad, num_pad)
         computed_len = min(computed_len, seq.n_blocks)
 
@@ -415,7 +424,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 # Set the reference counts of the token blocks.
                 block.ref_count = ref_count
                 block_table.append(block)
-
             return block_table, computed_len, delta
         else:
             use_hash:bool = True
@@ -457,7 +465,6 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         block_table: BlockTable = result[0]
         computed_len: int = result[1]
         seq_group.delta = result[2]
-        print(f"Computed len: {computed_len}, delta: {seq_group.delta}")
         
         seq_group.first_pad = seq.data.first_pad
         seq_group.num_pad = seq.data.num_pad

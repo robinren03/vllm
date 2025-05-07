@@ -391,7 +391,7 @@ async def run_server(args, llm_engine=None, **uvicorn_kwargs) -> None:
             else:
                 print(f"Unregistered machine {model_url} for model {model_name}")
         
-        with open("metrics.txt", "w") as f:
+        with open("metrics.txt", "a+") as f:
             metrics = {
                 "metrics_1": engine.engine.metrics_1,
                 "metrics_2": engine.engine.metrics_2

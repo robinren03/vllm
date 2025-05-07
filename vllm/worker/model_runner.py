@@ -349,15 +349,8 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
         inter_data.orig_seq_lens[seq_idx] = seq_len
         inter_data.context_lens[seq_idx] = context_len
         inter_data.input_tokens[seq_idx] = tokens
-        num_pad = seq_data.num_pad
-        first_pad = seq_data.first_pad
-        end_pad = first_pad + num_pad
-        def ret_pos(s,e,p):
-            if p>=e: return p-e+s
-            elif p>=s: return -1
-            else: return p
          
-        inter_data.input_positions[seq_idx] = [ret_pos(first_pad, end_pad, i) for i in range(context_len, seq_len)]
+        inter_data.input_positions[seq_idx] = np.arange(context_len, seq_len)
         inter_data.query_lens[
             seq_idx] = seq_len - context_len if inter_data.is_prompt else 1
 
@@ -398,18 +391,15 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
             pass
         else:
             pad_token_st = seq_group_metadata.first_pad
-            pad_token_num = seq_group_metadata.num_pad
-            pad_token_en = pad_token_st + pad_token_num
             delta = seq_group_metadata.delta
-            for i in range(max(context_len, pad_token_st), min(pad_token_en, seq_len)):
-                inter_data.fix_positions[seq_idx].append(-1)
-                inter_data.fix_token_pos[seq_idx].append(i)
-            
             if (delta):
-                for i in range(max(context_len, pad_token_en), min(prefix_cache_len, seq_len)):
+                import math
+                pad_token_corr = math.ceil(pad_token_st/16)*16
+                print(f"pad_token_st: {pad_token_st} delta:{delta}")
+                for i in range(max(context_len, pad_token_corr), min(prefix_cache_len, seq_len)):
                     inter_data.fix_positions[seq_idx].append(delta)
                     inter_data.fix_token_pos[seq_idx].append(i)
-
+                    
             if context_len < prefix_cache_len < seq_len:
                 # Partial hit. Compute the missing part.
                 uncomputed_start = prefix_cache_len - context_len
@@ -577,7 +567,7 @@ class ModelInputForGPUBuilder(ModelRunnerInputBuilderBase[ModelInputForGPU]):
                                            dtype=torch.long,
                                            device=self.runner.device)
         fix_slot_mapping = self.attn_metadata_builder.build_fix()
-        
+ 
         seq_lens = []
         max_decode_seq_len = 0
         for inter_data in self.inter_data_list:
@@ -1346,7 +1336,20 @@ class ModelRunner(GPUModelRunnerBase[ModelInputForGPUWithSamplingMetadata]):
         kv_caches: List[torch.Tensor]
     ) -> None:
         self.model.forward_fix(fix_input.positions, kv_caches, fix_input.slot_mapping)
-
+        
+        # positions = fix_input.positions.tolist()
+        # slot_mapping = fix_input.slot_mapping.tolist()
+        # target_block = positions[0] - 1
+        # target_block_idx = target_block // 16
+        # target_block_offset = target_block % 16
+        # for position, slot in zip(positions, slot_mapping):
+        #     if position == 0:
+        #         for kv_cache in kv_caches:
+        #             block_idx = slot // 16
+        #             block_offset = slot % 16
+        #             kv_cache[0][block_idx][block_offset] = kv_cache[0][target_block_idx][target_block_offset]
+        #             kv_cache[1][block_idx][block_offset] = kv_cache[1][target_block_idx][target_block_offset]
+        
     @torch.inference_mode()
     def execute_model(
         self,

@@ -742,6 +742,7 @@ class AsyncLLMEngine:
         prompt_adapter_request: Optional[PromptAdapterRequest] = None,
         session_id: Optional[str] = None,
         session_reuse: Optional[Union[int, Tuple[int, int, int]]] = -1,
+        arrival_time: Optional[float] = None,
         rounds: Optional[float] = -1,
         default_config: Optional[AgentConfig] = None
     ) -> AsyncIterator[RequestOutput]:
@@ -819,7 +820,8 @@ class AsyncLLMEngine:
                 session_id=session_id,
                 session_reuse=session_reuse,
                 rounds = rounds,
-                default_config = default_config
+                default_config = default_config,
+                arrival_time=arrival_time,
         ):
             yield LLMEngine.validate_output(output, RequestOutput)
 
@@ -911,6 +913,7 @@ class AsyncLLMEngine:
         request_id: str,
         inputs: PromptInputs,
         params: Union[SamplingParams, PoolingParams],
+        arrival_time: Optional[float] = None,
         *,
         lora_request: Optional[LoRARequest] = None,
         trace_headers: Optional[Mapping[str, str]] = None,
@@ -922,7 +925,6 @@ class AsyncLLMEngine:
     ) -> AsyncIterator[Union[RequestOutput, EmbeddingRequestOutput]]:
         """Common logic to process requests with SamplingParams or
         PoolingParams."""
-        arrival_time = time.time()
 
         stream = await self.add_request(
             request_id,

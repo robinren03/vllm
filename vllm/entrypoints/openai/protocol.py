@@ -146,6 +146,7 @@ class ChatCompletionRequest(OpenAIBaseModel):
     skip_special_tokens: bool = True
     spaces_between_special_tokens: bool = True
     truncate_prompt_tokens: Optional[Annotated[int, Field(ge=1)]] = None
+    arrival_time: Optional[float] = None
     # doc: end-chat-completion-sampling-params
 
     # doc: begin-chat-completion-extra-params
