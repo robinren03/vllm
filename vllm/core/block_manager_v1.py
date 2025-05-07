@@ -277,6 +277,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # Note that each SequenceGroup has a unique
         # request ID
         self.cross_block_tables: Dict[str, BlockTable] = {}
+        self.total_blocks = 0
+        self.hit_blocks = 0
 
     def _get_seq_num_required_blocks(self, seq: Sequence) -> int:
         return 0 if seq is None else seq.n_blocks
@@ -443,6 +445,9 @@ class BlockSpaceManagerV1(BlockSpaceManager):
                 block_table.append(block)
             return block_table, computed_len, delta
 
+    def get_hit_rate(self):
+        return self.hit_blocks / self.total_blocks
+    
     def allocate(self, seq_group: SequenceGroup, is_profile:bool=False) -> None:
         is_encoder_decoder = seq_group.is_encoder_decoder()
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
@@ -472,6 +477,9 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # Assign the self-attention block tables for each sequence.
         for seq in seq_group.get_seqs(status=SequenceStatus.WAITING):
             self.block_tables[seq.seq_id] = block_table.copy()
+
+        self.total_blocks += len(block_table)
+        self.hit_blocks += computed_len
 
         # Allocate encoder sequence
         if is_encoder_decoder:

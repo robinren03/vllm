@@ -327,6 +327,7 @@ class Stats:
     finished_reason_requests: List[str]
 
     spec_decode_metrics: Optional["SpecDecodeWorkerMetrics"] = None
+    gpu_cache_hit: Optional[float] = 0
 
 
 class SupportsMetricsInfo(Protocol):
@@ -409,6 +410,7 @@ class LoggingStatLogger(StatLoggerBase):
                 "Running: %d reqs, Swapped: %d reqs, "
                 "Pending: %d reqs, GPU KV cache usage: %.1f%%, "
                 "CPU KV cache usage: %.1f%%.",
+                "GPU KV cache hit rate: %.1f%%, ",
                 prompt_throughput,
                 generation_throughput,
                 stats.num_running_sys,
@@ -416,6 +418,7 @@ class LoggingStatLogger(StatLoggerBase):
                 stats.num_waiting_sys,
                 stats.gpu_cache_usage_sys * 100,
                 stats.cpu_cache_usage_sys * 100,
+                stats.gpu_cache_hit * 100
             )
 
             if self.spec_decode_metrics is not None:

@@ -1255,6 +1255,7 @@ class LLMEngine:
             best_of_requests=best_of_requests,
             n_requests=n_requests,
             finished_reason_requests=finished_reason_requests,
+            gpu_cache_hit=self.scheduler[0].block_manager.get_hit_rate()
         )
 
     def add_lora(self, lora_request: LoRARequest) -> bool:

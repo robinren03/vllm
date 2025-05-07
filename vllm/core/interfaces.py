@@ -44,7 +44,11 @@ class BlockSpaceManager(ABC):
     @abstractmethod
     def can_allocate(self, seq_group: SequenceGroup) -> AllocStatus:
         pass
-
+    
+    @abstractmethod
+    def get_hit_rate(self) -> float:
+        pass
+    
     @abstractmethod
     def allocate(self, seq_group: SequenceGroup) -> None:
         pass
