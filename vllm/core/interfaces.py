@@ -116,3 +116,7 @@ class BlockSpaceManager(ABC):
     @abstractmethod
     def mark_blocks_as_computed(self, seq_group: SequenceGroup):
         pass
+
+    @abstractmethod
+    def get_hit_rate(self) -> float:
+        pass

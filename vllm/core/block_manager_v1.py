@@ -32,6 +32,8 @@ class BlockAllocatorBase(ABC):
                  block_size: int,
                  num_blocks: int,
                  eviction_policy: EvictionPolicy = EvictionPolicy.LRU):
+        self.total_blocks = 0
+        self.hit_blocks = 0
         pass
 
     @abstractmethod
@@ -84,6 +86,9 @@ class CachedBlockAllocator(BlockAllocatorBase):
         self.evictor: Evictor = make_evictor(eviction_policy)
 
         self.default_hash_ctr = count()
+        self.total_blocks = 0
+        self.hit_blocks = 0
+
 
     def allocate_block(self, block_hash: int,
                        num_hashed_tokens: int) -> PhysicalTokenBlock:
@@ -103,6 +108,7 @@ class CachedBlockAllocator(BlockAllocatorBase):
     def allocate(self,
                  block_hash: Optional[int] = None,
                  num_hashed_tokens: int = 0) -> PhysicalTokenBlock:
+        self.total_blocks += 1
         if block_hash is None:
             block_hash = next(self.default_hash_ctr)
         if block_hash in self.evictor:
@@ -111,6 +117,7 @@ class CachedBlockAllocator(BlockAllocatorBase):
             assert block.ref_count == 0
             self.cached_blocks[block_hash] = block
             block.ref_count += 1
+            self.hit_blocks += 1
             assert block.block_hash == block_hash
             return block
         if block_hash not in self.cached_blocks:
@@ -318,6 +325,11 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
         return block_table
 
+    def get_hit_rate(self):
+        if self.gpu_allocator.total_blocks == 0:
+            return 0.0
+        return self.gpu_allocator.hit_blocks / self.gpu_allocator.total_blocks
+    
     def allocate(self, seq_group: SequenceGroup) -> None:
         is_encoder_decoder = seq_group.is_encoder_decoder()
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
