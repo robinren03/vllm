@@ -246,10 +246,24 @@ class _AsyncLLMEngine(LLMEngine):
         the sequences and returns the newly generated results.
         """
         current_time = time.time()
-        if (current_time - self.last_arragement) > 1:
+        if (current_time - self.last_arragement) > 0.5:
             self.remove_dead_session(self.session_id_blocks[virtual_engine], current_time)
             self.session_id_blocks[virtual_engine] = dict(sorted(self.session_id_blocks[virtual_engine].items(), 
                             key=lambda item: self.get_session_block_rank(item[0], current_time), reverse=True))
+
+            # session_id_arrived 顺序和实际正在等待的恰好相反
+            print("====== Start of session ranking test =======")
+            print("Session id arrived by order:", list(self.session_id_arrived[virtual_engine].keys()))
+            print("Pending request session ids:", [x.session_id for x in self.scheduler[virtual_engine].waiting])
+            print()
+
+            for session_id in self.session_id_blocks[virtual_engine].keys():
+                session_config = self.session_configs.get(session_id, SessionConfig(0, 0, 0, 3, current_time - 3 ,0))
+                prev_time = session_config.prev_time
+                tau = session_config.tau
+                print(f"Session id: {session_id}, ETA time:{prev_time + tau}, session config:{prev_time}, session tau:{tau}")
+            
+            print("====== End of session ranking test =======")
             self.last_arragement = current_time
         
         seq_group_metadata_list, scheduler_outputs = self.scheduler[

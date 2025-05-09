@@ -379,6 +379,9 @@ class LLMEngine:
                 self.add_request(f"profile-{idx}", TokensPrompt(prompt_token_ids=s), SamplingParams(max_tokens=1))
             while self.has_unfinished_requests():
                 _ = self.step()
+
+        self.scheduler[0].block_manager.total_blocks = 1
+        self.scheduler[0].block_manager.hit_blocks = 1
             
 
     def remove_dead_session(self, session_id_block:Dict[str,int], current_time: float):
@@ -1010,7 +1013,7 @@ class LLMEngine:
         
         # 使用sorted按rank排序
         current_time = time.time()
-        if (current_time - self.last_arragement) > 1:
+        if (current_time - self.last_arragement) > 0.5:
             self.remove_dead_session(self.session_id_blocks[0], current_time)
             self.session_id_blocks[0] = dict(sorted(self.session_id_blocks[0].items(), 
                             key=lambda item: self.get_session_block_rank(item[0], current_time), reverse=True))
@@ -1112,7 +1115,7 @@ class LLMEngine:
         gpu_cache_guess = [(a,b) for a,b in gpu_cache_guess]
         # print(gpu_cache_guess)
         delta = num_total_gpu * real_gpu_cache_usage_sys * 16 - gpu_cache_guess[0][1]
-        print("Time, Delta", current_time, delta, num_total_gpu * real_gpu_cache_usage_sys * 16)
+        # print("Time, Delta", current_time, delta, num_total_gpu * real_gpu_cache_usage_sys * 16)
         # print("gpu_cache_guess", gpu_cache_guess, "real gpu", num_total_gpu * real_gpu_cache_usage_sys * 16, "time", current_time)
         import math
         self.gpu_cache_guess = [(time, usage + delta * math.exp((current_time - time) * self.time_lr)) for time, usage in gpu_cache_guess]

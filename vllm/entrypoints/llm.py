@@ -124,8 +124,6 @@ class LLM:
         disable_custom_all_reduce: bool = False,
         **kwargs,
     ) -> None:
-        if "disable_log_stats" not in kwargs:
-            kwargs["disable_log_stats"] = True
         removed_vision_keys = ("image_token_id", "image_feature_size",
                                "image_input_shape", "image_input_type")
         if any(k in kwargs for k in removed_vision_keys):

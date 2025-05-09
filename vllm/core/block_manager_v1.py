@@ -277,8 +277,8 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         # Note that each SequenceGroup has a unique
         # request ID
         self.cross_block_tables: Dict[str, BlockTable] = {}
-        self.total_blocks = 0
-        self.hit_blocks = 0
+        self.total_blocks = 1
+        self.hit_blocks = 1
 
     def _get_seq_num_required_blocks(self, seq: Sequence) -> int:
         return 0 if seq is None else seq.n_blocks
@@ -481,6 +481,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         self.total_blocks += len(block_table)
         self.hit_blocks += computed_len
 
+        print("[ALLOCATED]", len(block_table), "with", computed_len, "computed blocks")
         # Allocate encoder sequence
         if is_encoder_decoder:
             # A SequenceGroup has only a single encoder sequence (at most),

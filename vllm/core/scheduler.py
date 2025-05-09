@@ -333,7 +333,7 @@ class Scheduler:
         # Finished sequence but their sequence group has not finished
         self._finished_queue: Deque[Sequence] = deque()
 
-        self.decode_prefill_ratio = 100 # avg_{wall}_time_to_decode_one_{request} / avg_{real}_time_to_prefill_one_{block}
+        self.decode_prefill_ratio = 10 # avg_{wall}_time_to_decode_one_{request} / avg_{real}_time_to_prefill_one_{block}
         # TODO(yanyu): Remind to write a profiler for decode_prefill_ratio
 
         # The following field is test-only. It is used to inject artificial
@@ -651,31 +651,47 @@ class Scheduler:
         val, evict_items, released_size = decode_prefill_ratio * len(evictable_items), [], 0
 
         for idx, seqs in enumerate(waiting, start=1):
+            # print(seqs.session_id, evictable_items[-1][0][0])
             if (idx > search_space):
                 break
+            if (evictable_items[-1][0][0] == seqs.session_id):
+                evictable_items = evictable_items[:-1]
+            if (not evictable_items):
+                break
             slots_required += self._get_seq_group_required_blocks(seqs)
-            val -= decode_prefill_ratio * (len(evictable_items) - idx + 1)
+            val -= decode_prefill_ratio * (1+len(evictable_items))
             decode_prefill_ratio = self.decode_prefill_ratio * budget.max_num_seqs / (idx + len(self.running))
             if (released_size < slots_required):
                 val, evict_items, released_size = min_vi(evictable_items, slots_required)
                 if val == -1:
                     break
-            val += decode_prefill_ratio * (len(evictable_items) - idx)
+            val += decode_prefill_ratio * (len(evictable_items))
             if val < best_val:
                 best_val = val
                 best_evict = evict_items.copy()
         
         if best_evict:
+            print(f"[BEFORE EVICTION] session to arrive: {len(session_id_block)}, arrived session:{len(session_id_arrived)}")
             for session_id, seq in best_evict:
                 assert (session_id in session_id_block) ^ (session_id in session_id_arrived), f"{session_id} {session_id_block} {session_id_arrived}"
-                print("[EVICTION DECIDED] Evicting", session_id, seq.seq_id)
+                # print("[EVICTION DECIDED] Evicting", session_id, seq.seq_id)
                 self.free_seq(seq)
                 if session_id in session_id_arrived:
+                    print("[EVICTION DECIDED] Evicting arrived session ranked ", list(session_id_arrived.keys()).index(session_id) , " of id ", session_id)
                     session_id_arrived.pop(session_id)
                 else:
+                    print("[EVICTION DECIDED] Evicting session to arrive ranked ", list(session_id_block.keys()).index(session_id) , " of id ", session_id)
                     session_id_block.pop(session_id)
             return True
         else:
+            if (forced_evict and (session_id_arrived or session_id_block)):
+                for session_id, seq in session_id_arrived.items():
+                    self.free_seq(seq)
+                    session_id_arrived.pop(session_id)
+                for session_id, seq in session_id_block.items():
+                    self.free_seq(seq)
+                    session_id_block.pop(session_id)
+                return True
             return False
         
 
@@ -1292,7 +1308,7 @@ class Scheduler:
                         print("[ERROR] dead lock...", num_round, self.running)
                         # exit(-1)
                         assert False
-                    print("[ERROR] failed to allocate more")
+                    # print("[ERROR] failed to allocate more")
                     return sched_output
                 self.last_waiting_len = (0,0,0)
             else:

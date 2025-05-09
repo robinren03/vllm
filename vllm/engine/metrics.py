@@ -409,8 +409,7 @@ class LoggingStatLogger(StatLoggerBase):
                 "Avg generation throughput: %.1f tokens/s, "
                 "Running: %d reqs, Swapped: %d reqs, "
                 "Pending: %d reqs, GPU KV cache usage: %.1f%%, "
-                "CPU KV cache usage: %.1f%%.",
-                "GPU KV cache hit rate: %.1f%%, ",
+                "CPU KV cache usage: %.1f%%, GPU KV cache hit rate: %.1f%%. ",
                 prompt_throughput,
                 generation_throughput,
                 stats.num_running_sys,
