@@ -297,9 +297,11 @@ class BlockSpaceManagerV1(BlockSpaceManager):
         check_no_caching_or_swa_for_blockmgr_encdec(self, seq_group)
 
         self_num_required_blocks = self._get_seq_num_required_blocks(
-            seq_group.get_seqs(status=SequenceStatus.WAITING)[0]) - \
+            seq_group.get_seqs(status=SequenceStatus.WAITING)[0])  - \
                 (seq_group.computed_block_seq.n_blocks if seq_group.computed_block_seq else 0)
         
+        seq = seq_group.get_seqs(status=SequenceStatus.WAITING)[0]
+        print("[ALLOCATE DECISION] requires", self_num_required_blocks, " blocks for sequence ID", seq.seq_id, "SID", seq_group.session_id, "with", (seq_group.computed_block_seq.n_blocks if seq_group.computed_block_seq else 0), " previously computed.")
         cross_num_required_blocks = self._get_seq_num_required_blocks(
             seq_group.get_encoder_seq())
         num_required_blocks = self_num_required_blocks + \
@@ -421,6 +423,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
 
         num_prompt_blocks = seq.n_blocks - computed_len
         if computed_len:
+            print("[TO ALLOCATE]", num_prompt_blocks, "blocks for session ID", seq.seq_id)
             for logical_idx in range(num_prompt_blocks):
                 block = self.gpu_allocator.allocate(is_profile=is_profile)
                 # Set the reference counts of the token blocks.
@@ -429,6 +432,7 @@ class BlockSpaceManagerV1(BlockSpaceManager):
             return block_table, computed_len, delta
         else:
             use_hash:bool = True
+            print("[TO ALLOCATE]", num_prompt_blocks, "blocks for session ID", seq.seq_id)
             for logical_idx in range(num_prompt_blocks):
                 if use_hash:
                     block=self.gpu_allocator.allocate_hash(

@@ -398,12 +398,10 @@ class LLMEngine:
         tau = session_config.tau
 
         # 计算rank的逻辑
-        if current_time - prev_time <= tau:
+        if current_time - prev_time <= 3 * tau:
             rank = prev_time + tau
-        elif current_time - prev_time <= 2 * tau:
+        elif current_time - prev_time <= 5 * tau:
             rank = prev_time + 2 * tau
-        elif current_time - prev_time <= 3 * tau:
-            rank = prev_time + 3 * tau
         else:
             rank = prev_time * 2
 
